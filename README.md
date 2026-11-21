@@ -18,6 +18,21 @@
 
 ## Installation
 
+### Homebrew
+
+To install with [Homebrew](http://brew.sh/) on macOS or Linux:
+
+```bash
+brew tap xwmx/taps
+brew install font
+```
+
+Or, to install without a separate tap step:
+
+```bash
+brew install xwmx/taps/font
+```
+
 ### Manual
 
 To install as an administrator, copy and paste one of the following multi-line commands:
