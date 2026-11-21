@@ -8,7 +8,7 @@
 
 # font
 
-`font` is a command line program for managing fonts.
+`font` is a command line program for managing fonts on macOS and Linux.
 
 `font` downloads fonts from online sources, installs them into your user font directory, and keeps track of exactly which files were installed, so fonts can be listed, checked, or cleanly removed later using simple, memorable commands.
 
@@ -44,14 +44,42 @@ curl -L https://raw.github.com/xwmx/font/master/font -o ~/bin/font && chmod +x ~
 
 ### Requirements
 
-`font` is a Bash script and depends on the following tools, which are included with macOS:
+`font` is a Bash script that works on macOS and Linux, including Ubuntu, Debian, Fedora, and Arch. It depends on the following tools:
 
 - `bash`
 - `curl`
 - `unzip`
 - `find`
 
-Fonts are installed into `~/Library/Fonts` by default, so `font` is intended for macOS. See [Configuration](#configuration) to change the destination.
+These are included with macOS. On Linux, `bash` and `find` are almost always present, but `curl` and `unzip` are missing from some minimal installations.
+
+On Linux, [fontconfig](https://www.freedesktop.org/wiki/Software/fontconfig/) is also recommended. When `fc-cache` is available, `font` uses it to refresh the font cache after installing or uninstalling fonts, so changes show up in applications right away. Without it, fonts still install, but applications may not see them until the cache is rebuilt or you log out and back in.
+
+```bash
+# Ubuntu / Debian
+sudo apt install curl unzip fontconfig
+
+# Fedora
+sudo dnf install curl unzip fontconfig
+
+# Arch Linux
+sudo pacman -S curl unzip fontconfig
+```
+
+### Font Directory
+
+Fonts are installed into the following directory by default:
+
+| Platform | Default font directory                          |
+|:---------|:------------------------------------------------|
+| macOS    | `~/Library/Fonts`                               |
+| Linux    | `${XDG_DATA_HOME:-~/.local/share}/fonts`        |
+
+To install somewhere else, set the `FONT_DIR` environment variable. For example, to install system-wide on Linux:
+
+```bash
+sudo FONT_DIR=/usr/local/share/fonts font install fontshare satoshi
+```
 
 ## Usage
 
@@ -65,7 +93,15 @@ Downloading 'satoshi' from fontshare...
 Installed 6 font file(s) for 'satoshi' into /Users/example/Library/Fonts
 ```
 
-Fonts are downloaded as an archive, and every `.otf` and `.ttf` file in the archive is copied into your font directory.
+On Linux the fonts are installed into `~/.local/share/fonts` instead:
+
+```
+> font install fontshare satoshi
+Downloading 'satoshi' from fontshare...
+Installed 6 font file(s) for 'satoshi' into /home/example/.local/share/fonts
+```
+
+Fonts are downloaded as an archive, and every `.otf` and `.ttf` file in the archive is copied into your font directory. On Linux, the font cache is then refreshed with `fc-cache` if it is installed.
 
 ### Sources
 
@@ -126,12 +162,20 @@ Installed on the system:
 
 In the first section the search string is matched against the source and font name, so `font list google` shows everything installed from Google Fonts. In the second section it is matched against file names.
 
-The system section searches the following directories, skipping any that don't exist:
+The system section searches the following directories, skipping any that don't exist. `$FONT_DIR` is always included.
 
-- `$FONT_DIR` (default `~/Library/Fonts`)
+On macOS:
+
 - `~/Library/Fonts`
 - `/Library/Fonts`
 - `/System/Library/Fonts`
+
+On Linux:
+
+- `${XDG_DATA_HOME:-~/.local/share}/fonts`
+- `~/.fonts`
+- `/usr/local/share/fonts`
+- `/usr/share/fonts`
 
 `.otf`, `.ttf`, `.ttc`, `.otc`, and `.dfont` files are included.
 
@@ -162,6 +206,8 @@ Incomplete or missing: 'satoshi' (fontshare) [4/6 file(s) present]
 > font uninstall fontshare satoshi
 Removed 6 font file(s) for 'satoshi' (fontshare)
 ```
+
+Install records are kept for the user that ran `font install`, so run `font uninstall` the same way you ran `font install`. For example, a font installed with `sudo` is uninstalled with `sudo`.
 
 ## Help
 
@@ -228,7 +274,8 @@ Sources:
 
 Exit status:
   0   Font successfully installed.
-  1   Invalid parameters, unsupported source, or download failure.
+  1   Invalid parameters, unsupported source, missing dependency
+      (curl or unzip), or download failure.
 ```
 
 ### `font list`

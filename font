@@ -340,6 +340,9 @@ then
   export TMPDIR="/tmp"
 fi
 
+# $TMPDIR is not set by default on most Linux systems.
+export TMPDIR="${TMPDIR:-/tmp}"
+
 # $_TEMP_DIRECTORY
 #
 # The full path to the temp directory.
@@ -497,10 +500,21 @@ trap 'printf "\\n"; _temp cleanup; exit 0'  SIGTERM
 # configuration
 ###############################################################################
 
+# $_OS
+#
+# The operating system name, as reported by `uname -s`, e.g. `Darwin`, `Linux`.
+_OS="$(uname -s)"
+
 # $_FONT_DIR
 #
-# Destination directory for installed fonts on macOS.
-_FONT_DIR="${FONT_DIR:-${HOME}/Library/Fonts}"
+# Destination directory for installed fonts. Defaults to `~/Library/Fonts` on
+# macOS and `${XDG_DATA_HOME:-~/.local/share}/fonts` on Linux and others.
+case "${_OS}" in
+  Darwin) _DEFAULT_FONT_DIR="${HOME}/Library/Fonts"                         ;;
+  *)      _DEFAULT_FONT_DIR="${XDG_DATA_HOME:-${HOME}/.local/share}/fonts"  ;;
+esac
+
+_FONT_DIR="${FONT_DIR:-${_DEFAULT_FONT_DIR}}"
 
 # $_MANIFEST_DIR
 #
@@ -523,6 +537,23 @@ _font_manifest_path() {
   local _font="${2}"
 
   printf "%s/%s/%s\n" "${_MANIFEST_DIR}" "${_source}" "${_font}"
+}
+
+# _refresh_font_cache()
+#
+# Usage:
+#   _refresh_font_cache
+#
+# Description:
+#   Refresh the fontconfig cache for `$_FONT_DIR` on systems that use it.
+#   Does nothing on macOS or when `fc-cache` isn't available.
+_refresh_font_cache() {
+  if [[ "${_OS}" != "Darwin" ]] && _command_exists fc-cache
+  then
+    _debug printf "Refreshing font cache for %s\\n" "${_FONT_DIR}"
+
+    fc-cache -f "${_FONT_DIR}" >/dev/null 2>&1 || :
+  fi
 }
 
 ###############################################################################
@@ -1049,6 +1080,13 @@ install() {
     _exit_1 printf "Usage: %s install <source> <font>\\n" "${_ME}"
   fi
 
+  local __command=
+  for   __command in curl unzip
+  do
+    _command_exists "${__command}" ||
+      _exit_1 printf "Required command not found: %s\\n" "${__command}"
+    done
+
   local _manifest_file=
   _manifest_file="$(_font_manifest_path "${_source}" "${_font}")"
 
@@ -1063,6 +1101,8 @@ install() {
       _exit_1 printf "Unsupported font source: %s\\n" "${_source}"
       ;;
   esac
+
+  _refresh_font_cache
 }
 
 # ------------------------------------------------------------------------ list
@@ -1132,12 +1172,28 @@ list() {
     fi
   fi
 
+  local _candidate_dirs=("${_FONT_DIR}")
+
+  case "${_OS}" in
+    Darwin)
+      _candidate_dirs+=(
+        "${HOME}/Library/Fonts"
+        "/Library/Fonts"
+        "/System/Library/Fonts"
+      )
+      ;;
+    *)
+      _candidate_dirs+=(
+        "${XDG_DATA_HOME:-${HOME}/.local/share}/fonts"
+        "${HOME}/.fonts"
+        "/usr/local/share/fonts"
+        "/usr/share/fonts"
+      )
+      ;;
+  esac
+
   local __dir=
-  for   __dir in            \
-    "${_FONT_DIR}"          \
-    "${HOME}/Library/Fonts" \
-    "/Library/Fonts"        \
-    "/System/Library/Fonts"
+  for   __dir in "${_candidate_dirs[@]}"
   do
     [[ -d "${__dir}" ]] && _system_dirs+=("${__dir}")
   done
@@ -1322,6 +1378,8 @@ uninstall() {
 
   rm -f "${_manifest_file}"
   rmdir "$(dirname "${_manifest_file}")" 2>/dev/null || true
+
+  _refresh_font_cache
 
   printf "Removed %d font file(s) for '%s' (%s)\n"  \
     "${_removed}"                                   \
