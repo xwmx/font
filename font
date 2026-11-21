@@ -569,7 +569,7 @@ _font_manifest_path() {
 # var="$(cat <<'HEREDOC'
 # some message
 # HEREDOC
-# )
+# )"
 #
 # However, this form appears to require trailing space after backslases to
 # preserve newlines, which is unexpected. Using `read` simply requires
@@ -897,22 +897,25 @@ install() {
     local _tmp_zip=
     local _tmp_dir=
 
-    _tmp_zip="$(mktemp "${TMPDIR:-/tmp}/fontshare-${_font}.XXXXXX.zip")"
-    _tmp_dir="$(mktemp -d "${TMPDIR:-/tmp}/fontshare-${_font}.XXXXXX")"
+    _tmp_zip="$(_temp file ".zip")"
+    _tmp_dir="$(_temp file "extracted-${_font}")"
 
-    trap 'rm -rf "${_tmp_zip}" "${_tmp_dir}"' RETURN
-
-    mkdir -p "${_FONT_DIR}" "$(dirname "${_manifest_file}")"
+    mkdir -p "${_FONT_DIR}" "$(dirname "${_manifest_file}")" "${_tmp_dir}"
 
     _debug printf "Downloading %s from %s\\n" "${_font}" "${_url}"
     printf "Downloading '%s' from fontshare...\n" "${_font}"
 
     if ! curl -fsSL "${_url}" -o "${_tmp_zip}"
     then
+      rm -f "${_manifest_file}"
       _exit_1 printf "Failed to download '%s' from fontshare.\\n" "${_font}"
     fi
 
-    unzip -q "${_tmp_zip}" -d "${_tmp_dir}"
+    if ! unzip -q "${_tmp_zip}" -d "${_tmp_dir}"
+    then
+      rm -f "${_manifest_file}"
+      _exit_1 printf "Failed to extract archive for '%s'.\\n" "${_font}"
+    fi
 
     : > "${_manifest_file}"
 
