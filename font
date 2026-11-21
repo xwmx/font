@@ -558,6 +558,140 @@ _refresh_font_cache() {
   fi
 }
 
+# _is_url()
+#
+# Usage:
+#   _is_url <string>
+#
+# Exit / Error Status:
+#   0 (success, true)  If <string> starts with `http://` or `https://`.
+#   1 (error,  false)  If not.
+_is_url() {
+  case "${1:-}" in
+    http://*|https://*) return 0 ;;
+    *)                  return 1 ;;
+  esac
+}
+
+# _url_decode()
+#
+# Usage:
+#   _url_decode <string>
+#
+# Description:
+#   Print <string> with %XX escapes decoded.
+_url_decode() {
+  printf "%b" "$(printf "%s" "${1}" | sed -e 's/%\([0-9A-Fa-f][0-9A-Fa-f]\)/\\x\1/g')"
+}
+
+# _resolve_font_url()
+#
+# Usage:
+#   _resolve_font_url <url>
+#
+# Description:
+#   Identify the source and font for a font <url> and print them on one line,
+#   separated by a space: `<source> <font>`. Sources never contain spaces, so
+#   everything after the first space is the font. Exits with status 1 when the
+#   URL isn't recognized. Recognized URLs:
+#
+#   - Fontshare pages and download links
+#   - Google Fonts specimen pages and download links
+#   - Homebrew cask pages
+#   - Direct links to .zip, .ttf, and .otf files, with source `url`
+_resolve_font_url() {
+  local _url="${1}"
+  local _rest="${_url#*://}"
+  local _host="${_rest%%[/?#]*}"
+  local _path="${_rest#"${_host}"}"
+  local _params=
+  local _name=
+  local _pair=
+  local _pairs=()
+  local _source=
+  local _font=
+
+  if [[ "${_path}" == *\?* ]]
+  then
+    _params="${_path#*\?}"
+    _params="${_params%%#*}"
+  fi
+
+  _path="${_path%%[?#]*}"
+  _host="$(printf "%s" "${_host}" | tr '[:upper:]' '[:lower:]')"
+  _host="${_host#www.}"
+
+  case "${_host}" in
+    fontshare.com)
+      if [[ "${_path}" == /fonts/* ]]
+      then
+        _name="${_path#/fonts/}"
+        _source="fontshare"
+        _font="${_name%%/*}"
+      fi
+      ;;
+    api.fontshare.com)
+      if [[ "${_path}" == /v2/fonts/download/* ]]
+      then
+        _name="${_path#/v2/fonts/download/}"
+        _source="fontshare"
+        _font="${_name%%/*}"
+      fi
+      ;;
+    fonts.google.com)
+      if [[ "${_path}" == *"/specimen/"* ]]
+      then
+        _name="${_path#*/specimen/}"
+        _name="${_name%%/*}"
+      elif [[ "${_path}" == /download* ]]
+      then
+        IFS='&' read -r -a _pairs <<< "${_params}"
+
+        for _pair in "${_pairs[@]:-}"
+        do
+          if [[ "${_pair}" == family=* ]]
+          then
+            _name="${_pair#family=}"
+            break
+          fi
+        done
+      fi
+
+      if [[ -n "${_name}" ]]
+      then
+        _source="google"
+        _font="$(_url_decode "${_name//+/ }")"
+      fi
+      ;;
+    formulae.brew.sh)
+      if [[ "${_path}" == /cask/* ]]
+      then
+        _name="${_path#/cask/}"
+        _name="${_name%%/*}"
+        _source="homebrew"
+        _font="${_name%.html}"
+      fi
+      ;;
+    *)
+      _name="${_path##*/}"
+
+      if [[ -n "${_name}" ]]
+      then
+        _source="url"
+        _font="$(_url_decode "${_name%.*}")"
+      fi
+      ;;
+  esac
+
+  if [[ -z "${_source}" ]] ||
+     [[ -z "${_font}"   ]]
+  then
+    _exit_1 printf "Unrecognized font URL: %s\\n" "${_url}"
+  fi
+
+  printf "%s %s\\n" "${_source}" "${_font}"
+}
+
 ###############################################################################
 # describe
 ###############################################################################
@@ -910,9 +1044,29 @@ version() {
 describe "install" <<HEREDOC
 Usage:
   ${_ME} install <source> <font>
+  ${_ME} install <url>
 
 Description:
-  Install a <font> from <source>.
+  Install a <font> from <source>, or from a font <url>.
+
+Sources:
+  fontshare   A font from Fontshare, by name.
+  google      A font family from Google Fonts, by name.
+  homebrew    A font cask from Homebrew, by cask name. macOS only.
+  url         A direct link to a .zip, .ttf, or .otf file.
+
+URLs:
+  Fontshare and Google Fonts pages, Homebrew cask pages, and direct links
+  to .zip, .ttf, or .otf files are recognized, so a <url> can be used
+  anywhere a <source> and <font> are accepted.
+
+Examples:
+  ${_ME} install fontshare paquito
+  ${_ME} install google "Open Sans"
+  ${_ME} install homebrew font-fira-code
+  ${_ME} install https://www.fontshare.com/fonts/paquito
+  ${_ME} install https://fonts.google.com/specimen/Montserrat
+  ${_ME} install https://example.com/fonts/Example.zip
 HEREDOC
 install() {
   # _install_from_fontshare()
@@ -1093,10 +1247,108 @@ install() {
     printf "Installed '%s' with homebrew\n" "${_font}"
   }
 
+  # _install_from_url()
+  #
+  # Usage:
+  #   _install_from_url <font> <manifest_file> <url>
+  #
+  # Description:
+  #   Download a .zip archive or a single .ttf or .otf file from <url>, copy
+  #   font files into `$_FONT_DIR`, and record installed paths in
+  #   `<manifest_file>`.
+  _install_from_url() {
+    _debug printf "_install_from_url()\\n"
+
+    local _font="${1}"
+    local _manifest_file="${2}"
+    local _url="${3:-}"
+
+    if [[ -z "${_url}" ]]
+    then
+      _exit_1 printf "A URL is required. Usage: %s install <url>\\n" "${_ME}"
+    fi
+
+    local _url_path="${_url%%[?#]*}"
+    local _file_name=
+    local _extension=
+    local _tmp_download=
+    local _tmp_dir=
+
+    _file_name="$(_url_decode "${_url_path##*/}")"
+    _extension="$(printf "%s" "${_file_name##*.}" | tr '[:upper:]' '[:lower:]')"
+
+    case "${_extension}" in
+      zip|ttf|otf)
+        :
+        ;;
+      *)
+        _exit_1 printf "Unsupported URL: %s\\nExpected a fontshare, google, or homebrew page, or a link to a .zip, .ttf, or .otf file.\\n" "${_url}"
+        ;;
+    esac
+
+    _tmp_download="$(_temp file ".${_extension}")"
+    _tmp_dir="$(_temp file "extracted-${_font}")"
+
+    mkdir -p "${_FONT_DIR}" "$(dirname "${_manifest_file}")" "${_tmp_dir}"
+
+    _debug printf "Downloading %s from %s\\n" "${_font}" "${_url}"
+    printf "Downloading '%s' from %s...\n" "${_font}" "${_url}"
+
+    if ! curl -fsSL "${_url}" -o "${_tmp_download}"
+    then
+      rm -f "${_manifest_file}"
+      _exit_1 printf "Failed to download '%s'.\\n" "${_url}"
+    fi
+
+    if [[ "${_extension}" == "zip" ]]
+    then
+      if ! unzip -q "${_tmp_download}" -d "${_tmp_dir}"
+      then
+        rm -f "${_manifest_file}"
+        _exit_1 printf "Failed to extract archive for '%s'.\\n" "${_font}"
+      fi
+    else
+      cp -f "${_tmp_download}" "${_tmp_dir}/${_file_name}"
+    fi
+
+    : > "${_manifest_file}"
+
+    local _count=0
+    local _base_name=
+    local _dest_path=
+    local _font_file=
+
+    while IFS= read -r -d '' _font_file
+    do
+      _base_name="$(basename "${_font_file}")"
+      _dest_path="${_FONT_DIR}/${_base_name}"
+
+      cp -f "${_font_file}" "${_dest_path}"
+
+      printf "%s\n" "${_dest_path}" >> "${_manifest_file}"
+
+      _count=$((_count + 1))
+    done < <(find "${_tmp_dir}" -type f \( -name "*.otf" -o -name "*.ttf" \) -print0)
+
+    if (( _count == 0 ))
+    then
+      rm -f "${_manifest_file}"
+
+      _exit_1 printf "No .otf or .ttf files found for '%s'.\\n" "${_font}"
+    fi
+
+    printf "Installed %d font file(s) for '%s' into %s\n"   \
+      "${_count}"                                           \
+      "${_font}"                                            \
+      "${_FONT_DIR}"
+  }
+
   _debug printf "_install()\\n"
 
   local _arguments=()
   local _font=
+  local _font_url=
+  local _resolved=
   local _source=
 
 
@@ -1118,10 +1370,19 @@ install() {
     shift
   done
 
+  if [[ -z "${_font:-}" ]] && _is_url "${_source:-}"
+  then
+    _font_url="${_source}"
+    _resolved="$(_resolve_font_url "${_font_url}")"
+
+    _source="${_resolved%% *}"
+    _font="${_resolved#* }"
+  fi
+
   if [[ -z "${_source:-}" ]] ||
      [[ -z "${_font:-}"   ]]
   then
-    _exit_1 printf "Usage: %s install <source> <font>\\n" "${_ME}"
+    _exit_1 printf "Usage: %s install ( <source> <font> | <url> )\\n" "${_ME}"
   fi
 
   local _required_commands=(curl unzip)
@@ -1151,6 +1412,9 @@ install() {
     homebrew)
       _install_from_homebrew "${_font}" "${_manifest_file}"
       ;;
+    url)
+      _install_from_url "${_font}" "${_manifest_file}" "${_font_url}"
+      ;;
     *)
       _exit_1 printf "Unsupported font source: %s\\n" "${_source}"
       ;;
@@ -1178,7 +1442,13 @@ Description:
   listed, and the system font files are omitted.
 
 Sources:
-  fontshare, google, homebrew
+  fontshare, google, homebrew, url
+
+Examples:
+  ${_ME} list
+  ${_ME} list satoshi
+  ${_ME} list --source google
+  ${_ME} list --source homebrew mono
 HEREDOC
 list() {
   # _list_matches()
@@ -1225,7 +1495,7 @@ list() {
   done
 
   case "${_source_filter}" in
-    ""|fontshare|google|homebrew)
+    ""|fontshare|google|homebrew|url)
       :
       ;;
     *)
@@ -1369,13 +1639,25 @@ list() {
 describe "status" <<HEREDOC
 Usage:
   ${_ME} status <source> <font>
+  ${_ME} status <url>
 
 Description:
-  Check whether a <font> from <source> is installed.
+  Check whether a <font> from <source>, or a font <url>, is installed. For
+  homebrew, Homebrew is asked whether the cask is installed.
+
+Exit status:
+  0  Font is installed and all files are present.
+  1  Font is not installed, or some files are missing.
+
+Examples:
+  ${_ME} status fontshare paquito
+  ${_ME} status homebrew font-fira-code
+  ${_ME} status https://fonts.google.com/specimen/Montserrat
 HEREDOC
 status() {
   local _arguments=()
   local _font=
+  local _resolved=
   local _source=
 
   while ((${#}))
@@ -1397,10 +1679,18 @@ status() {
     shift
   done
 
+  if [[ -z "${_font:-}" ]] && _is_url "${_source:-}"
+  then
+    _resolved="$(_resolve_font_url "${_source}")"
+
+    _source="${_resolved%% *}"
+    _font="${_resolved#* }"
+  fi
+
   if [[ -z "${_source:-}" ]] ||
      [[ -z "${_font:-}"   ]]
   then
-    _exit_1 printf "Usage: %s status <source> <font>\\n" "${_ME}"
+    _exit_1 printf "Usage: %s status ( <source> <font> | <url> )\\n" "${_ME}"
   fi
 
   if [[ "${_source}" == "homebrew" ]]
@@ -1471,13 +1761,26 @@ status() {
 describe "uninstall" <<HEREDOC
 Usage:
   ${_ME} uninstall <source> <font>
+  ${_ME} uninstall <url>
 
 Description:
-  Install a <font> from <source>.
+  Uninstall a <font> from <source>, or a font <url>, by removing the files
+  recorded when it was installed. For homebrew, the cask is removed with
+  \`brew uninstall --cask\`.
+
+Exit status:
+  0  Font successfully uninstalled.
+  1  Invalid parameters or no install record found.
+
+Examples:
+  ${_ME} uninstall fontshare paquito
+  ${_ME} uninstall homebrew font-fira-code
+  ${_ME} uninstall https://fonts.google.com/specimen/Montserrat
 HEREDOC
 uninstall() {
   local _arguments=()
   local _font=
+  local _resolved=
   local _source=
 
 
@@ -1499,10 +1802,18 @@ uninstall() {
     shift
   done
 
+  if [[ -z "${_font:-}" ]] && _is_url "${_source:-}"
+  then
+    _resolved="$(_resolve_font_url "${_source}")"
+
+    _source="${_resolved%% *}"
+    _font="${_resolved#* }"
+  fi
+
   if [[ -z "${_source:-}" ]] ||
      [[ -z "${_font:-}"   ]]
   then
-    _exit_1 printf "Usage: %s uninstall <source> <font>\\n" "${_ME}"
+    _exit_1 printf "Usage: %s uninstall ( <source> <font> | <url> )\\n" "${_ME}"
   fi
 
   local _manifest_file=

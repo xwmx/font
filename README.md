@@ -124,6 +124,8 @@ Installed 6 font file(s) for 'satoshi' into /home/example/.local/share/fonts
 
 Fonts are downloaded as an archive, and every `.otf` and `.ttf` file in the archive is copied into your font directory. On Linux, the font cache is then refreshed with `fc-cache` if it is installed.
 
+A URL can be used in place of a source and font name. See [Installing from URLs](#installing-from-urls).
+
 ### Sources
 
 `font` currently supports the following sources:
@@ -133,6 +135,7 @@ Fonts are downloaded as an archive, and every `.otf` and `.ttf` file in the arch
 | `fontshare` | The font's slug on [Fontshare](https://www.fontshare.com/)  | `font install fontshare general-sans` |
 | `google`    | The family name on [Google Fonts](https://fonts.google.com/) | `font install google "Open Sans"`    |
 | `homebrew`  | The full cask name from [Homebrew's font casks](https://formulae.brew.sh/cask-font/), macOS only | `font install homebrew font-fira-code` |
+| `url`       | A direct link to a `.zip`, `.ttf`, or `.otf` file, see [Installing from URLs](#installing-from-urls) | `font install https://example.com/fonts/Example.zip` |
 
 Quote font names that contain spaces.
 
@@ -159,6 +162,55 @@ Instead of downloading and copying files itself, `font` runs `brew install --cas
 - Only font casks are accepted, so names that don't start with `font-` are rejected. This keeps `font` from installing regular applications.
 - Homebrew manages the font files, so [`FONT_DIR`](#font-directory) is ignored.
 - `font list`, `font status`, and `font uninstall` ask Homebrew directly, so they work with every installed font cask, including ones you installed with `brew` before using `font`.
+
+### Installing from URLs
+
+Instead of a source and font name, `font install` accepts a URL. `font status` and `font uninstall` do too, so the same URL identifies a font in all three commands. These URLs are recognized:
+
+| URL                    | Example                                         | Source      | Font             |
+|:-----------------------|:------------------------------------------------|:------------|:-----------------|
+| Fontshare page         | `https://www.fontshare.com/fonts/paquito`       | `fontshare` | `paquito`        |
+| Google Fonts page      | `https://fonts.google.com/specimen/Montserrat`  | `google`    | `Montserrat`     |
+| Homebrew cask page     | `https://formulae.brew.sh/cask/font-fira-code`  | `homebrew`  | `font-fira-code` |
+| Direct link to a file  | `https://example.com/fonts/Example.zip`         | `url`       | `Example`        |
+
+Fontshare and Google Fonts download links are recognized as well. A URL for one of these sources is recorded under that source, exactly as if you had typed the source and font name, so `font install https://www.fontshare.com/fonts/paquito` and `font install fontshare paquito` are equivalent:
+
+```
+> font install https://fonts.google.com/specimen/Montserrat
+Downloading 'Montserrat' from google...
+Installed 18 font file(s) for 'Montserrat' into /Users/example/Library/Fonts
+
+> font status google Montserrat
+Installed: 'Montserrat' (google) [18/18 file(s) present]
+```
+
+Quote URLs that contain `&` or `?` so your shell doesn't interpret them.
+
+#### Direct Links
+
+A link to any other host is treated as a direct link to a font file. A `.zip` link installs every `.otf` and `.ttf` file in the archive, and a `.ttf` or `.otf` link installs that file. Query strings and fragments are ignored when working out the file type.
+
+Direct links are recorded under the `url` source, using the file name without its extension as the font name:
+
+```
+> font install https://example.com/fonts/Example.zip
+Downloading 'Example' from https://example.com/fonts/Example.zip...
+Installed 2 font file(s) for 'Example' into /Users/example/Library/Fonts
+
+> font status url Example
+Installed: 'Example' (url) [2/2 file(s) present]
+
+> font list --source url
+Installed with font:
+  url Example
+```
+
+Some things to keep in mind:
+
+- A URL that isn't recognized, or a direct link to any other type of file, is rejected with an error.
+- Two links with the same file name share one record, so the second install replaces the first.
+- `font install url Example` does not work, since the link itself is needed to download. Use the URL. `font status` and `font uninstall` can use either form.
 
 ### Listing Fonts
 
@@ -215,7 +267,7 @@ Installed with font:
   homebrew font-hack
 ```
 
-`--source` can be combined with a search string, so `font list --source homebrew hack` shows only the Homebrew fonts that match `hack`. The system font files are not listed when `--source` is used, since they aren't associated with a source. The source must be one of `fontshare`, `google`, or `homebrew`.
+`--source` can be combined with a search string, so `font list --source homebrew hack` shows only the Homebrew fonts that match `hack`. The system font files are not listed when `--source` is used, since they aren't associated with a source. The source must be one of `fontshare`, `google`, `homebrew`, or `url`.
 
 The system section searches the following directories, skipping any that don't exist. `$FONT_DIR` is always included.
 
@@ -253,6 +305,8 @@ If some of the installed files have been deleted by hand, `font status` reports 
 Incomplete or missing: 'satoshi' (fontshare) [4/6 file(s) present]
 ```
 
+A [URL](#installing-from-urls) can be used in place of a source and font, as in `font status https://www.fontshare.com/fonts/paquito`.
+
 For the `homebrew` source, `font status` asks Homebrew whether the cask is installed, so there is no file count:
 
 ```
@@ -270,6 +324,8 @@ Removed 6 font file(s) for 'satoshi' (fontshare)
 ```
 
 Install records are kept for the user that ran `font install`, so run `font uninstall` the same way you ran `font install`. For example, a font installed with `sudo` is uninstalled with `sudo`.
+
+A [URL](#installing-from-urls) can be used in place of a source and font, as in `font uninstall https://example.com/fonts/Example.zip`.
 
 Fonts from the `homebrew` source are removed with `brew uninstall --cask`:
 
@@ -333,19 +389,35 @@ Description:
 ```
 Usage:
   font install <source> <font>
+  font install <url>
 
 Description:
-  Install a <font> from <source>.
+  Install a <font> from <source>, or from a font <url>.
 
 Sources:
-  fontshare   Download from Fontshare.
-  google      Download from Google Fonts.
-  homebrew    Install a font cask with Homebrew (macOS only).
+  fontshare   A font from Fontshare, by name.
+  google      A font family from Google Fonts, by name.
+  homebrew    A font cask from Homebrew, by cask name. macOS only.
+  url         A direct link to a .zip, .ttf, or .otf file.
+
+URLs:
+  Fontshare and Google Fonts pages, Homebrew cask pages, and direct links
+  to .zip, .ttf, or .otf files are recognized, so a <url> can be used
+  anywhere a <source> and <font> are accepted.
+
+Examples:
+  font install fontshare paquito
+  font install google "Open Sans"
+  font install homebrew font-fira-code
+  font install https://www.fontshare.com/fonts/paquito
+  font install https://fonts.google.com/specimen/Montserrat
+  font install https://example.com/fonts/Example.zip
 
 Exit status:
   0   Font successfully installed.
-  1   Invalid parameters, unsupported source, missing dependency
-      (curl and unzip, or brew for homebrew), or download failure.
+  1   Invalid parameters, unrecognized or unsupported URL, unsupported
+      source, missing dependency (curl and unzip, or brew for homebrew),
+      or download failure.
 ```
 
 ### `font list`
@@ -367,7 +439,13 @@ Description:
   listed, and the system font files are omitted.
 
 Sources:
-  fontshare, google, homebrew
+  fontshare, google, homebrew, url
+
+Examples:
+  font list
+  font list satoshi
+  font list --source google
+  font list --source homebrew mono
 
 Exit status:
   0   Success, including when no entries match.
@@ -379,14 +457,20 @@ Exit status:
 ```
 Usage:
   font status <source> <font>
+  font status <url>
 
 Description:
-  Check whether a <font> from <source> is installed. For homebrew, Homebrew
-  is asked whether the cask is installed.
+  Check whether a <font> from <source>, or a font <url>, is installed. For
+  homebrew, Homebrew is asked whether the cask is installed.
 
 Exit status:
   0   Font is installed and all files are present.
   1   Font is not installed, or some files are missing.
+
+Examples:
+  font status fontshare paquito
+  font status homebrew font-fira-code
+  font status https://fonts.google.com/specimen/Montserrat
 ```
 
 ### `font subcommands`
@@ -407,15 +491,21 @@ Description:
 ```
 Usage:
   font uninstall <source> <font>
+  font uninstall <url>
 
 Description:
-  Uninstall a <font> from <source> by removing the files recorded when
-  it was installed. For homebrew, the cask is removed with
+  Uninstall a <font> from <source>, or a font <url>, by removing the files
+  recorded when it was installed. For homebrew, the cask is removed with
   `brew uninstall --cask`.
 
 Exit status:
   0   Font successfully uninstalled.
   1   Invalid parameters or no install record found.
+
+Examples:
+  font uninstall fontshare paquito
+  font uninstall homebrew font-fira-code
+  font uninstall https://fonts.google.com/specimen/Montserrat
 ```
 
 ### `font version`
