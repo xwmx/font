@@ -1163,13 +1163,22 @@ install() {
 
 describe "list" <<HEREDOC
 Usage:
-  ${_ME} list [<search string>]
+  ${_ME} list [--source <source>] [<search string>]
+
+Options:
+  --source <source>  Only list fonts installed from <source>.
 
 Description:
   List the fonts installed with ${_ME}, followed by all font files found in
   the system's font directories. When provided with a search string or
   regular expression, only matching entries are listed. Matching is
   case-insensitive.
+
+  When --source is used, only fonts installed from the specified source are
+  listed, and the system font files are omitted.
+
+Sources:
+  fontshare, google, homebrew
 HEREDOC
 list() {
   # _list_matches()
@@ -1184,11 +1193,45 @@ list() {
     printf "%s\\n" "${1:-}" | grep -q -E -i -e "${_query:-.}"
   }
 
-  local _query="${1:-}"
+  local _query=
+  local _source_filter=
   local _found=0
   local _manifest_file=
   local _system_dirs=()
   local _system_output=
+
+  while ((${#}))
+  do
+    case "${1:-}" in
+      --source)
+        _source_filter="${2:-}"
+
+        if [[ -z "${_source_filter}" ]]
+        then
+          _exit_1 printf "Usage: %s list [--source <source>] [<search string>]\\n" "${_ME}"
+        fi
+
+        shift
+        ;;
+      *)
+        if [[ -z "${_query}" ]]
+        then
+          _query="${1:-}"
+        fi
+        ;;
+    esac
+
+    shift
+  done
+
+  case "${_source_filter}" in
+    ""|fontshare|google|homebrew)
+      :
+      ;;
+    *)
+      _exit_1 printf "Unsupported font source: %s\\n" "${_source_filter}"
+      ;;
+  esac
 
   # `grep` exits with `2` when the pattern is invalid and `1` for no match.
   local _grep_status=0
@@ -1219,7 +1262,9 @@ list() {
     _entries+=("${_entry}")
   done
 
-  if [[ "${_OS}" == "Darwin" ]] && _command_exists brew
+  if [[ "${_OS}" == "Darwin" ]] &&
+     [[ -z "${_source_filter}" || "${_source_filter}" == "homebrew" ]] &&
+     _command_exists brew
   then
     local _cask=
     while IFS= read -r _cask
@@ -1234,6 +1279,12 @@ list() {
   for _entry in "${_entries[@]:-}"
   do
     [[ -n "${_entry}" ]] || continue
+
+    if [[ -n "${_source_filter}" ]] &&
+       [[ "${_entry}" != "${_source_filter} "* ]]
+    then
+      continue
+    fi
 
     if _list_matches "${_entry}"
     then
@@ -1251,6 +1302,12 @@ list() {
     else
       printf "  (none)\\n"
     fi
+  fi
+
+  # System font files aren't associated with a source.
+  if [[ -n "${_source_filter}" ]]
+  then
+    return 0
   fi
 
   local _candidate_dirs=("${_FONT_DIR}")

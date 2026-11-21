@@ -153,12 +153,12 @@ Installing 'font-fira-code' with homebrew...
 Installed 'font-fira-code' with homebrew
 ```
 
-Instead of downloading and copying files itself, `font` runs `brew install --cask` and records that the cask was installed with `font`. A few things work differently from the other sources:
+Instead of downloading and copying files itself, `font` runs `brew install --cask`. A few things work differently from the other sources:
 
 - It is only available on macOS, and requires `brew` rather than `curl` and `unzip`.
 - Only font casks are accepted, so names that don't start with `font-` are rejected. This keeps `font` from installing regular applications.
 - Homebrew manages the font files, so [`FONT_DIR`](#font-directory) is ignored.
-- If a cask is already installed, `font install` adopts it, and a later `font uninstall` will remove it.
+- `font list`, `font status`, and `font uninstall` ask Homebrew directly, so they work with every installed font cask, including ones you installed with `brew` before using `font`.
 
 ### Listing Fonts
 
@@ -201,6 +201,21 @@ Installed on the system:
 ```
 
 In the first section the search string is matched against the source and font name, so `font list google` shows everything installed from Google Fonts. In the second section it is matched against file names.
+
+To list fonts from a single source, use `--source`:
+
+```
+> font list --source google
+Installed with font:
+  google Open Sans
+
+> font list --source homebrew
+Installed with font:
+  homebrew font-fira-code
+  homebrew font-hack
+```
+
+`--source` can be combined with a search string, so `font list --source homebrew hack` shows only the Homebrew fonts that match `hack`. The system font files are not listed when `--source` is used, since they aren't associated with a source. The source must be one of `fontshare`, `google`, or `homebrew`.
 
 The system section searches the following directories, skipping any that don't exist. `$FONT_DIR` is always included.
 
@@ -337,7 +352,10 @@ Exit status:
 
 ```
 Usage:
-  font list [<search string>]
+  font list [--source <source>] [<search string>]
+
+Options:
+  --source <source>  Only list fonts installed from <source>.
 
 Description:
   List the fonts installed with font, followed by all font files found in
@@ -345,9 +363,15 @@ Description:
   regular expression, only matching entries are listed. Matching is
   case-insensitive.
 
+  When --source is used, only fonts installed from the specified source are
+  listed, and the system font files are omitted.
+
+Sources:
+  fontshare, google, homebrew
+
 Exit status:
   0   Success, including when no entries match.
-  1   Invalid search pattern.
+  1   Invalid search pattern, unsupported source, or missing source name.
 ```
 
 ### `font status`
