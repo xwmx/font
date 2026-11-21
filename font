@@ -679,55 +679,70 @@ version() {
 #
 ###############################################################################
 
-# Example Section #############################################################
+# --------------------------------------------------------------------- install
 
-# --------------------------------------------------------------------- example
-
-describe "example" <<HEREDOC
+describe "install" <<HEREDOC
 Usage:
-  ${_ME} example [<name>] [--farewell]
-
-Options:
-  --farewell  Print "Goodbye, World!"
+  ${_ME} install <source> <font>
 
 Description:
-  Print "Hello, World!"
+  Install a <font> from <source>.
 HEREDOC
-example() {
+install() {
   local _arguments=()
-  local _greeting="Hello"
-  local _name=
+  local _font=
+  local _source=
 
-  for __arg in "${@:-}"
+
+  while ((${#}))
   do
-    case ${__arg} in
-      --farewell)
-        _greeting="Goodbye"
-        ;;
-      -*)
-        _exit_1 printf "Unexpected option: %s\\n" "${__arg}"
-        ;;
+    case "${1:-}" in
       *)
-        if _blank "${_name}"
+        if [[ -z "${_source:-}" ]]
         then
-          _name="${__arg}"
+          _source="${1:-}"
+        elif [[ -z "${_font:-}" ]]
+        then
+          _font="${1:-}"
         else
           _arguments+=("${__arg}")
         fi
-        ;;
     esac
   done
 
+  # TODO: install
+}
 
-  if [[ "${_name}" == "Moon" ]]
-  then
-    printf "%s, Luna!\\n" "${_greeting}"
-  elif [[ -n "${_name}" ]]
-  then
-    printf "%s, %s!\\n" "${_greeting}" "${_name}"
-  else
-    printf "%s, World!\\n" "${_greeting}"
-  fi
+describe "uninstall" <<HEREDOC
+Usage:
+  ${_ME} uninstall <source> <font>
+
+Description:
+  Install a <font> from <source>.
+HEREDOC
+uninstall() {
+  local _arguments=()
+  local _font=
+  local _source=
+
+
+  while ((${#}))
+  do
+    case "${1:-}" in
+      *)
+        if [[ -z "${_source:-}" ]]
+        then
+          _source="${1:-}"
+        elif [[ -z "${_font:-}" ]]
+        then
+          _font="${1:-}"
+        else
+          _arguments+=("${__arg}")
+        fi
+    esac
+  done
+
+  # TODO: uninstall
 }
 
 ###############################################################################
