@@ -10,7 +10,7 @@
 
 `font` is a command line program for managing fonts.
 
-`font` downloads fonts from online sources, installs them into your user font directory, and keeps track of exactly which files were installed, so a font can be checked or cleanly removed later using simple, memorable commands.
+`font` downloads fonts from online sources, installs them into your user font directory, and keeps track of exactly which files were installed, so fonts can be listed, checked, or cleanly removed later using simple, memorable commands.
 
 `font` is designed to be lightweight, easy to use, and contained in a single, portable script that can be `curl`ed into any environment.
 
@@ -84,6 +84,57 @@ Downloading 'Open Sans' from google...
 Installed 20 font file(s) for 'Open Sans' into /Users/example/Library/Fonts
 ```
 
+### Listing Fonts
+
+`font list` shows the fonts installed with `font`, followed by all font files found in the system's font directories:
+
+```
+> font list
+Installed with font:
+  fontshare satoshi
+  google Open Sans
+
+Installed on the system:
+  Arial.ttf
+  Helvetica.ttc
+  OpenSans-Bold.ttf
+  Satoshi-Regular.otf
+  ...
+```
+
+Each entry in the first section is a `<source> <font>` pair, the same values used with `font status` and `font uninstall`. The second section lists font files by file name, and includes fonts that were not installed with `font`.
+
+`font list` called with a string or regular expression will show only matching entries. Matching is case-insensitive and uses extended regular expressions:
+
+```
+> font list satoshi
+Installed with font:
+  fontshare satoshi
+
+Installed on the system:
+  Satoshi-Bold.otf
+  Satoshi-Regular.otf
+
+> font list '^open.*bold'
+Installed with font:
+  (no matches)
+
+Installed on the system:
+  OpenSans-Bold.ttf
+  OpenSans-BoldItalic.ttf
+```
+
+In the first section the search string is matched against the source and font name, so `font list google` shows everything installed from Google Fonts. In the second section it is matched against file names.
+
+The system section searches the following directories, skipping any that don't exist:
+
+- `$FONT_DIR` (default `~/Library/Fonts`)
+- `~/Library/Fonts`
+- `/Library/Fonts`
+- `/System/Library/Fonts`
+
+`.otf`, `.ttf`, `.ttc`, `.otc`, and `.dfont` files are included.
+
 ### Checking Status
 
 `font status` reports whether a font is installed. It exits with status `0` when every recorded file is present and `1` otherwise, so it can be used in scripts:
@@ -114,7 +165,7 @@ Removed 6 font file(s) for 'satoshi' (fontshare)
 
 ### How It Works
 
-When a font is installed, `font` writes a manifest listing the path of each file it copied. `status` and `uninstall` read this manifest, which means fonts installed some other way are never touched.
+When a font is installed, `font` writes a manifest listing the path of each file it copied. `list`, `status`, and `uninstall` read these manifests, which means fonts installed some other way are never touched by `status` or `uninstall`.
 
 Manifests are stored per source and font:
 
@@ -146,7 +197,7 @@ For example, to install fonts system-wide:
 sudo FONT_DIR=/Library/Fonts font install fontshare satoshi
 ```
 
-Use the same `FONT_MANIFEST_DIR` for `install`, `status`, and `uninstall`, or `font` won't be able to find the manifests it created.
+Use the same `FONT_MANIFEST_DIR` for `install`, `list`, `status`, and `uninstall`, or `font` won't be able to find the manifests it created.
 
 ## Help
 
@@ -178,7 +229,7 @@ font help <subcommand name>
 
 ## Subcommands
 
-[help](#font-help) • [install](#font-install) • [status](#font-status) • [subcommands](#font-subcommands) • [uninstall](#font-uninstall) • [version](#font-version)
+[help](#font-help) • [install](#font-install) • [list](#font-list) • [status](#font-status) • [subcommands](#font-subcommands) • [uninstall](#font-uninstall) • [version](#font-version)
 
 ### `font help`
 
@@ -206,6 +257,23 @@ Sources:
 Exit status:
   0   Font successfully installed.
   1   Invalid parameters, unsupported source, or download failure.
+```
+
+### `font list`
+
+```
+Usage:
+  font list [<search string>]
+
+Description:
+  List the fonts installed with font, followed by all font files found in
+  the system's font directories. When provided with a search string or
+  regular expression, only matching entries are listed. Matching is
+  case-insensitive.
+
+Exit status:
+  0   Success, including when no entries match.
+  1   Invalid search pattern.
 ```
 
 ### `font status`

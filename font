@@ -1065,6 +1065,111 @@ install() {
   esac
 }
 
+# ------------------------------------------------------------------------ list
+
+describe "list" <<HEREDOC
+Usage:
+  ${_ME} list [<search string>]
+
+Description:
+  List the fonts installed with ${_ME}, followed by all font files found in
+  the system's font directories. When provided with a search string or
+  regular expression, only matching entries are listed. Matching is
+  case-insensitive.
+HEREDOC
+list() {
+  # _list_matches()
+  #
+  # Usage:
+  #   _list_matches <string>
+  #
+  # Description:
+  #   Succeed if <string> matches the search pattern, which is all strings
+  #   when no search string was given.
+  _list_matches() {
+    printf "%s\\n" "${1:-}" | grep -q -E -i -e "${_query:-.}"
+  }
+
+  local _query="${1:-}"
+  local _found=0
+  local _manifest_file=
+  local _system_dirs=()
+  local _system_output=
+
+  # `grep` exits with `2` when the pattern is invalid and `1` for no match.
+  local _grep_status=0
+  printf "" | grep -E -i -e "${_query:-.}" >/dev/null 2>&1 || _grep_status=$?
+
+  if ((_grep_status == 2))
+  then
+    _exit_1 printf "Invalid search pattern: %s\\n" "${_query}"
+  fi
+
+  printf "Installed with %s:\\n" "${_ME}"
+
+  local _entry=
+  for _manifest_file in "${_MANIFEST_DIR}"/*/*
+  do
+    [[ -f "${_manifest_file}" ]] || continue
+
+    _entry="$(basename "$(dirname "${_manifest_file}")") $(basename "${_manifest_file}")"
+
+    if _list_matches "${_entry}"
+    then
+      printf "  %s\\n" "${_entry}"
+
+      _found=1
+    fi
+  done
+
+  if ! ((_found))
+  then
+    if [[ -n "${_query}" ]]
+    then
+      printf "  (no matches)\\n"
+    else
+      printf "  (none)\\n"
+    fi
+  fi
+
+  local __dir=
+  for   __dir in            \
+    "${_FONT_DIR}"          \
+    "${HOME}/Library/Fonts" \
+    "/Library/Fonts"        \
+    "/System/Library/Fonts"
+  do
+    [[ -d "${__dir}" ]] && _system_dirs+=("${__dir}")
+  done
+
+  printf "\\nInstalled on the system:\\n"
+
+  if ((${#_system_dirs[@]}))
+  then
+    _system_output="$(
+      { find "${_system_dirs[@]}" -type f \(      \
+          -iname "*.otf" -o -iname "*.ttf"        \
+          -o -iname "*.ttc" -o -iname "*.otc"     \
+          -o -iname "*.dfont"                     \
+        \) -print 2>/dev/null || :; }             \
+        | sed -e 's|.*/||'                        \
+        | sort -u                                 \
+        | { grep -E -i -e "${_query:-.}" || :; }  \
+        | sed -e 's/^/  /'
+    )"
+  fi
+
+  if [[ -n "${_system_output}" ]]
+  then
+    printf "%s\\n" "${_system_output}"
+  elif [[ -n "${_query}" ]]
+  then
+    printf "  (no matches)\\n"
+  else
+    printf "  (none)\\n"
+  fi
+}
+
 # ---------------------------------------------------------------------- status
 
 describe "status" <<HEREDOC
