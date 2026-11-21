@@ -330,6 +330,169 @@ _piped_input() {
   ! _interactive_input
 }
 
+# Cache & Temp ################################################### Cache & Temp
+
+# $TMPDIR
+#
+# Reset $TMPDIR if it's set to the current working directory by npm.
+if [[ "${TMPDIR:-}" == "${PWD}" ]]
+then
+  export TMPDIR="/tmp"
+fi
+
+# $_TEMP_DIRECTORY
+#
+# The full path to the temp directory.
+export _TEMP_DIRECTORY
+_TEMP_DIRECTORY="$(mktemp -d)"
+
+# $_CACHE_PATH
+#
+# The full path to the cache directory.
+export _CACHE_PATH="${TMPDIR}/.cache"
+
+if [[   -d "${TMPDIR}"      ]] &&
+   [[ ! -e "${_CACHE_PATH}" ]]
+then
+  mkdir -p "${_CACHE_PATH}"
+fi
+
+# $_TEMP_PIDS
+#
+# A list of PIDS that should be terminated on exit.
+_TEMP_PIDS=()
+
+# $_MY_PID
+#
+# The PID of this program.
+_MY_PID="$$"
+
+# _temp()
+#
+# Usage:
+#   _temp cache [clear]
+#   _temp cleanup
+#   _temp directory
+#   _temp file [<basename> | <relative-path> | <extension>] [--touch]
+#   _temp pid <pid>
+#
+# Subcommands:
+#   cache       Print the full path to the cache directory, or optionally clear
+#               the cache.
+#   cleanup     Force delete the temp directory.
+#   directory   Print the full path the the temp directory.
+#   file        Initialize a temporary file path.
+#   pid         Specify a process ID that should be terminated on exit.
+#
+# Description:
+#   Manage temp and cache files and directories.
+_temp() {
+  # Usage: _temp_validate_path <path>
+  _temp_validate_path() {
+    [[ -n "${1:?}"              ]] &&
+    [[    "${1}" != "/"         ]] &&
+    [[    "${1}" != "${HOME}"   ]] &&
+    [[    "${1}" != "${PWD}"    ]] &&
+    [[ -e "${1}"                ]]
+  }
+
+  local _subcommand="${1:-}"
+
+  case "${_subcommand}" in
+    cache)
+      if [[ "${2:-}" == "clear" ]]
+      then
+        if _temp_validate_path "${_CACHE_PATH:?}"
+        then
+          rm -r "${_CACHE_PATH:?}"
+          mkdir -p "${_CACHE_PATH}"
+        fi
+      else
+        printf "%s\\n" "${_CACHE_PATH}"
+      fi
+      ;;
+    cleanup)
+      # Skip running cleanup if we are in a subshell or child process.
+      if [[ "$$" != "${_MY_PID}" ]]
+      then
+        return 0
+      fi
+
+      if _temp_validate_path "${_TEMP_DIRECTORY:?}"
+      then
+        if [[ -f "${_TEMP_DIRECTORY}/ncat.pid" ]]
+        then
+          local _ncat_pid=
+          _ncat_pid="$(cat "${_TEMP_DIRECTORY}/ncat.pid" 2>/dev/null)"
+
+          if [[ -n "${_ncat_pid:-}" ]]
+          then
+            kill -9 "${_ncat_pid}" 2>/dev/null || :
+          fi
+        fi
+
+        rm -rf "${_TEMP_DIRECTORY:?}"
+      fi
+
+      local __pid=
+      for   __pid in "${_TEMP_PIDS[@]:-}"
+      do
+        [[ -n "${__pid:-}" ]] || continue
+
+        kill -9 "${__pid}" 2>/dev/null || :
+      done
+      ;;
+    dir|directory)
+      printf "%s\\n" "${_TEMP_DIRECTORY:-}"
+      ;;
+    file)
+      local _extension=
+      local _relative_path=
+      local _touch=0
+
+      local __arg=
+      for   __arg in "${2:-}" "${3:-}"
+      do
+        case "${__arg}" in
+          "")       :                           ;;
+          --touch)  _touch=1                    ;;
+          \.*)      _extension="${__arg:-}"     ;;
+          *)        _relative_path="${__arg:-}" ;;
+        esac
+      done
+
+      local _temp_file_path=
+
+      if [[ -z  "${_relative_path:-}"       ]]
+      then
+        _temp_file_path="${_TEMP_DIRECTORY}/${RANDOM}${_extension:-}"
+      else
+        _temp_file_path="${_TEMP_DIRECTORY}/${_relative_path:-}"
+      fi
+
+      if [[     "${_relative_path:-}" =~ /  ]]
+      then
+        mkdir -p "${_temp_file_path%/*}"
+      fi
+
+      if ((_touch))
+      then
+        touch "${_temp_file_path}"
+      fi
+
+      printf "%s\\n" "${_temp_file_path:-}"
+      ;;
+    pid)
+      _TEMP_PIDS+=("${2:?}")
+      ;;
+  esac
+}
+
+trap "_temp cleanup"                        EXIT
+trap "exit"                                 INT
+trap 'printf "\\n"; _temp cleanup; exit 0'  SIGINT
+trap 'printf "\\n"; _temp cleanup; exit 0'  SIGTERM
+
 ###############################################################################
 # configuration
 ###############################################################################
