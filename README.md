@@ -229,7 +229,15 @@ font help <subcommand name>
 
 ## Subcommands
 
-[help](#font-help) • [install](#font-install) • [list](#font-list) • [status](#font-status) • [subcommands](#font-subcommands) • [uninstall](#font-uninstall) • [version](#font-version)
+<p align="center">
+  <a href="#font-help">(default) / help</a> •
+  <a href="#font-install">install</a> •
+  <a href="#font-list">list</a> •
+  <a href="#font-status">status</a> •
+  <a href="#font-subcommands">subcommands</a> •
+  <a href="#font-uninstall">uninstall</a> •
+  <a href="#font-version">version</a>
+</p>
 
 ### `font help`
 
