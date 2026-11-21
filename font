@@ -949,6 +949,75 @@ install() {
       "${_FONT_DIR}"
   }
 
+  # _install_from_google()
+  #
+  # Usage:
+  #   _install_from_google <font> <manifest_file>
+  #
+  # Description:
+  #   Download a font family archive from Google Fonts, copy font files into
+  #   `$_FONT_DIR`, and record installed paths in `<manifest_file>`.
+  _install_from_google() {
+    _debug printf "_install_from_google()\\n"
+
+    local _font="${1}"
+    local _manifest_file="${2}"
+    local _url="https://fonts.google.com/download?family=${_font// /%20}"
+    local _tmp_zip=
+    local _tmp_dir=
+
+    _tmp_zip="$(_temp file ".zip")"
+    _tmp_dir="$(_temp file "extracted-${_font}")"
+
+    mkdir -p "${_FONT_DIR}" "$(dirname "${_manifest_file}")" "${_tmp_dir}"
+
+    _debug printf "Downloading %s from %s\\n" "${_font}" "${_url}"
+    printf "Downloading '%s' from google...\n" "${_font}"
+
+    if ! curl -fsSL "${_url}" -o "${_tmp_zip}"
+    then
+      rm -f "${_manifest_file}"
+      _exit_1 printf "Failed to download '%s' from google.\\n" "${_font}"
+    fi
+
+    if ! unzip -q "${_tmp_zip}" -d "${_tmp_dir}"
+    then
+      rm -f "${_manifest_file}"
+      _exit_1 printf "Failed to extract archive for '%s'.\\n" "${_font}"
+    fi
+
+    : > "${_manifest_file}"
+
+    local _count=0
+    local _base_name=
+    local _dest_path=
+    local _font_file=
+
+    while IFS= read -r -d '' _font_file
+    do
+      _base_name="$(basename "${_font_file}")"
+      _dest_path="${_FONT_DIR}/${_base_name}"
+
+      cp -f "${_font_file}" "${_dest_path}"
+
+      printf "%s\n" "${_dest_path}" >> "${_manifest_file}"
+
+      _count=$((_count + 1))
+    done < <(find "${_tmp_dir}" -type f \( -name "*.otf" -o -name "*.ttf" \) -print0)
+
+    if (( _count == 0 ))
+    then
+      rm -f "${_manifest_file}"
+
+      _exit_1 printf "No .otf or .ttf files found in archive for '%s'.\\n" "${_font}"
+    fi
+
+    printf "Installed %d font file(s) for '%s' into %s\n"   \
+      "${_count}"                                           \
+      "${_font}"                                            \
+      "${_FONT_DIR}"
+  }
+
   _debug printf "_install()\\n"
 
   local _arguments=()
@@ -986,6 +1055,9 @@ install() {
   case "${_source}" in
     fontshare)
       _install_from_fontshare "${_font}" "${_manifest_file}"
+      ;;
+    google)
+      _install_from_google "${_font}" "${_manifest_file}"
       ;;
     *)
       _exit_1 printf "Unsupported font source: %s\\n" "${_source}"
