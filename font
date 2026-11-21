@@ -1202,11 +1202,38 @@ list() {
   printf "Installed with %s:\\n" "${_ME}"
 
   local _entry=
+  local _entries=()
+
   for _manifest_file in "${_MANIFEST_DIR}"/*/*
   do
     [[ -f "${_manifest_file}" ]] || continue
 
     _entry="$(basename "$(dirname "${_manifest_file}")") $(basename "${_manifest_file}")"
+
+    # Homebrew font casks are listed from Homebrew itself, below.
+    if [[ "${_entry}" == homebrew\ * ]]
+    then
+      continue
+    fi
+
+    _entries+=("${_entry}")
+  done
+
+  if [[ "${_OS}" == "Darwin" ]] && _command_exists brew
+  then
+    local _cask=
+    while IFS= read -r _cask
+    do
+      if [[ -n "${_cask}" ]]
+      then
+        _entries+=("homebrew ${_cask}")
+      fi
+    done < <(brew list --cask 2>/dev/null | { grep '^font-' || :; })
+  fi
+
+  for _entry in "${_entries[@]:-}"
+  do
+    [[ -n "${_entry}" ]] || continue
 
     if _list_matches "${_entry}"
     then
@@ -1319,16 +1346,6 @@ status() {
     _exit_1 printf "Usage: %s status <source> <font>\\n" "${_ME}"
   fi
 
-  local _manifest_file
-  _manifest_file="$(_font_manifest_path "${_source}" "${_font}")"
-
-  if [[ ! -f "${_manifest_file}" ]]
-  then
-    _debug printf "No manifest found at %s\\n" "${_manifest_file}"
-    printf "Not installed: '%s' (%s)\\n" "${_font}" "${_source}" >&2
-    return 1
-  fi
-
   if [[ "${_source}" == "homebrew" ]]
   then
     if _command_exists brew && brew list --cask "${_font}" >/dev/null 2>&1
@@ -1337,7 +1354,17 @@ status() {
       return 0
     fi
 
-    printf "Incomplete or missing: '%s' (%s)\\n" "${_font}" "${_source}" >&2
+    printf "Not installed: '%s' (%s)\\n" "${_font}" "${_source}" >&2
+    return 1
+  fi
+
+  local _manifest_file=
+  _manifest_file="$(_font_manifest_path "${_source}" "${_font}")"
+
+  if [[ ! -f "${_manifest_file}" ]]
+  then
+    _debug printf "No manifest found at %s\\n" "${_manifest_file}"
+    printf "Not installed: '%s' (%s)\\n" "${_font}" "${_source}" >&2
     return 1
   fi
 
@@ -1424,22 +1451,19 @@ uninstall() {
   local _manifest_file=
   _manifest_file="$(_font_manifest_path "${_source}" "${_font}")"
 
-  if [[ ! -f "${_manifest_file}" ]]
-  then
-    _exit_1 printf "No manifest found for '%s' from '%s'.\\n" "${_font}" "${_source}"
-  fi
-
   if [[ "${_source}" == "homebrew" ]]
   then
     _command_exists brew ||
       _exit_1 printf "Required command not found: brew\\n"
 
-    if brew list --cask "${_font}" >/dev/null 2>&1
+    if ! brew list --cask "${_font}" >/dev/null 2>&1
     then
-      if ! brew uninstall --cask "${_font}"
-      then
-        _exit_1 printf "Failed to uninstall '%s' with homebrew.\\n" "${_font}"
-      fi
+      _exit_1 printf "Not installed: '%s' (%s)\\n" "${_font}" "${_source}"
+    fi
+
+    if ! brew uninstall --cask "${_font}"
+    then
+      _exit_1 printf "Failed to uninstall '%s' with homebrew.\\n" "${_font}"
     fi
 
     rm -f "${_manifest_file}"
@@ -1447,6 +1471,11 @@ uninstall() {
 
     printf "Removed '%s' (%s)\n" "${_font}" "${_source}"
     return 0
+  fi
+
+  if [[ ! -f "${_manifest_file}" ]]
+  then
+    _exit_1 printf "No manifest found for '%s' from '%s'.\\n" "${_font}" "${_source}"
   fi
 
   local _installed_path=
