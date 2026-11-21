@@ -92,10 +92,6 @@ set -o nounset
 # Short form: set -e
 set -o errexit
 
-# Print a helpful message if a pipeline with non-zero exit code causes the
-# script to exit as described above.
-trap 'echo "Aborting due to errexit on line $LINENO. Exit code: $?" >&2' ERR
-
 # Allow the above trap be inherited by all functions in the script.
 #
 # Short form: set -E
@@ -332,6 +328,38 @@ _interactive_input() {
 #   1 (error,  false)  If the current input is interactive (eg, a shell).
 _piped_input() {
   ! _interactive_input
+}
+
+###############################################################################
+# configuration
+###############################################################################
+
+# $_FONT_DIR
+#
+# Destination directory for installed fonts on macOS.
+_FONT_DIR="${FONT_DIR:-${HOME}/Library/Fonts}"
+
+# $_MANIFEST_DIR
+#
+# Directory used to record installed font paths per source and font slug.
+_MANIFEST_DIR="${FONT_MANIFEST_DIR:-${XDG_DATA_HOME:-${HOME}/.local/share}/font}"
+
+###############################################################################
+# helpers
+###############################################################################
+
+# _font_manifest_path()
+#
+# Usage:
+#   _font_manifest_path <source> <font>
+#
+# Description:
+#   Print the manifest file path for a given font source and font slug.
+_font_manifest_path() {
+  local _source="${1}"
+  local _font="${2}"
+
+  printf "%s/%s/%s\n" "${_MANIFEST_DIR}" "${_source}" "${_font}"
 }
 
 ###############################################################################
@@ -689,6 +717,74 @@ Description:
   Install a <font> from <source>.
 HEREDOC
 install() {
+  # _install_from_fontshare()
+  #
+  # Usage:
+  #   _install_from_fontshare <font> <manifest_file>
+  #
+  # Description:
+  #   Download a font archive from Fontshare's API, copy font files into
+  #   `$_FONT_DIR`, and record installed paths in `<manifest_file>`.
+  _install_from_fontshare() {
+    _debug printf "_install_from_fontshare()\\n"
+
+    local _font="${1}"
+    local _manifest_file="${2}"
+    local _url="https://api.fontshare.com/v2/fonts/download/${_font}"
+    local _tmp_zip
+    local _tmp_dir
+
+    _tmp_zip="$(mktemp "${TMPDIR:-/tmp}/fontshare-${_font}.XXXXXX.zip")"
+    _tmp_dir="$(mktemp -d "${TMPDIR:-/tmp}/fontshare-${_font}.XXXXXX")"
+
+    trap 'rm -rf "${_tmp_zip}" "${_tmp_dir}"' RETURN
+
+    mkdir -p "${_FONT_DIR}" "$(dirname "${_manifest_file}")"
+
+    _debug printf "Downloading %s from %s\\n" "${_font}" "${_url}"
+    printf "Downloading '%s' from fontshare...\n" "${_font}"
+
+    if ! curl -fsSL "${_url}" -o "${_tmp_zip}"
+    then
+      _exit_1 printf "Failed to download '%s' from fontshare.\\n" "${_font}"
+    fi
+
+    unzip -q "${_tmp_zip}" -d "${_tmp_dir}"
+
+    : > "${_manifest_file}"
+
+    local _count=0
+    local _base_name=
+    local _dest_path=
+    local _font_file=
+
+    while IFS= read -r -d '' _font_file
+    do
+      _base_name="$(basename "${_font_file}")"
+      _dest_path="${_FONT_DIR}/${_base_name}"
+
+      cp -f "${_font_file}" "${_dest_path}"
+
+      printf "%s\n" "${_dest_path}" >> "${_manifest_file}"
+
+      _count=$((_count + 1))
+    done < <(find "${_tmp_dir}" -type f \( -name "*.otf" -o -name "*.ttf" \) -print0)
+
+    if (( _count == 0 ))
+    then
+      rm -f "${_manifest_file}"
+
+      _exit_1 printf "No .otf or .ttf files found in archive for '%s'.\\n" "${_font}"
+    fi
+
+    printf "Installed %d font file(s) for '%s' into %s\n"   \
+      "${_count}"                                           \
+      "${_font}"                                            \
+      "${_FONT_DIR}"
+  }
+
+  _debug printf "_install()\\n"
+
   local _arguments=()
   local _font=
   local _source=
@@ -705,13 +801,123 @@ install() {
         then
           _font="${1:-}"
         else
-          _arguments+=("${__arg}")
+          _arguments+=("${1:-}")
         fi
     esac
+
+    shift
   done
 
-  # TODO: install
+  if [[ -z "${_source:-}" ]] ||
+     [[ -z "${_font:-}"   ]]
+  then
+    _exit_1 printf "Usage: %s install <source> <font>\\n" "${_ME}"
+  fi
+
+  local _manifest_file=
+  _manifest_file="$(_font_manifest_path "${_source}" "${_font}")"
+
+  case "${_source}" in
+    fontshare)
+      _install_from_fontshare "${_font}" "${_manifest_file}"
+      ;;
+    *)
+      _exit_1 printf "Unsupported font source: %s\\n" "${_source}"
+      ;;
+  esac
 }
+
+# ---------------------------------------------------------------------- status
+
+describe "status" <<HEREDOC
+Usage:
+  ${_ME} status <source> <font>
+
+Description:
+  Check whether a <font> from <source> is installed.
+HEREDOC
+status() {
+  local _arguments=()
+  local _font=
+  local _source=
+
+  while ((${#}))
+  do
+    case "${1:-}" in
+      *)
+        if [[ -z "${_source:-}" ]]
+        then
+          _source="${1:-}"
+        elif [[ -z "${_font:-}" ]]
+        then
+          _font="${1:-}"
+        else
+          _arguments+=("${1:-}")
+        fi
+        ;;
+    esac
+
+    shift
+  done
+
+  if [[ -z "${_source:-}" ]] ||
+     [[ -z "${_font:-}"   ]]
+  then
+    _exit_1 printf "Usage: %s status <source> <font>\\n" "${_ME}"
+  fi
+
+  local _manifest_file
+  _manifest_file="$(_font_manifest_path "${_source}" "${_font}")"
+
+  if [[ ! -f "${_manifest_file}" ]]
+  then
+    _debug printf "No manifest found at %s\\n" "${_manifest_file}"
+    printf "Not installed: '%s' (%s)\\n" "${_font}" "${_source}" >&2
+    return 1
+  fi
+
+  local _installed_path=
+  local _total=0
+  local _present=0
+  local _missing=0
+
+  while IFS= read -r _installed_path
+  do
+    if [[ -n "${_installed_path}"    ]]
+    then
+      _total=$((_total + 1))
+      if [[ -e "${_installed_path}"  ]]
+      then
+        _present=$((_present + 1))
+
+        _debug printf "Present: %s\\n" "${_installed_path}"
+      else
+        _missing=$((_missing + 1))
+
+        _debug printf "Missing: %s\\n" "${_installed_path}"
+      fi
+    fi
+  done < "${_manifest_file}"
+
+  if (( _total > 0 )) && (( _missing == 0 ))
+  then
+    printf "Installed: '%s' (%s) [%d/%d file(s) present]\\n"  \
+      "${_font}"                                              \
+      "${_source}"                                            \
+      "${_present}"                                           \
+      "${_total}"
+    return 0
+  fi
+
+  printf "Incomplete or missing: '%s' (%s) [%d/%d file(s) present]\\n"  \
+    "${_font}"                                                          \
+    "${_source}"                                                        \
+    "${_present}"                                                       \
+    "${_total}"                                                         >&2
+  return 1
+}
+
+# ------------------------------------------------------------------- uninstall
 
 describe "uninstall" <<HEREDOC
 Usage:
@@ -737,12 +943,47 @@ uninstall() {
         then
           _font="${1:-}"
         else
-          _arguments+=("${__arg}")
+          _arguments+=("${1:-}")
         fi
     esac
+
+    shift
   done
 
-  # TODO: uninstall
+  if [[ -z "${_source:-}" ]] ||
+     [[ -z "${_font:-}"   ]]
+  then
+    _exit_1 printf "Usage: %s uninstall <source> <font>\\n" "${_ME}"
+  fi
+
+  local _manifest_file=
+  _manifest_file="$(_font_manifest_path "${_source}" "${_font}")"
+
+  if [[ ! -f "${_manifest_file}" ]]
+  then
+    _exit_1 printf "No manifest found for '%s' from '%s'.\\n" "${_font}" "${_source}"
+  fi
+
+  local _installed_path=
+  local _removed=0
+
+  while IFS= read -r _installed_path
+  do
+    if  [[ -n "${_installed_path}" ]] &&
+        [[ -e "${_installed_path}" ]]
+    then
+      rm -f "${_installed_path}"
+      _removed=$((_removed + 1))
+    fi
+  done < "${_manifest_file}"
+
+  rm -f "${_manifest_file}"
+  rmdir "$(dirname "${_manifest_file}")" 2>/dev/null || true
+
+  printf "Removed %d font file(s) for '%s' (%s)\n"  \
+    "${_removed}"                                   \
+    "${_font}"                                      \
+    "${_source}"
 }
 
 ###############################################################################
