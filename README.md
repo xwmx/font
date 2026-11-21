@@ -8,7 +8,7 @@
         \/__/               "888"
 ```
 
-# font
+# 𝓯𝕠𝖓ⓣ
 
 `font` is a command line program for managing fonts on macOS and Linux.
 
