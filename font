@@ -731,8 +731,8 @@ install() {
     local _font="${1}"
     local _manifest_file="${2}"
     local _url="https://api.fontshare.com/v2/fonts/download/${_font}"
-    local _tmp_zip
-    local _tmp_dir
+    local _tmp_zip=
+    local _tmp_dir=
 
     _tmp_zip="$(mktemp "${TMPDIR:-/tmp}/fontshare-${_font}.XXXXXX.zip")"
     _tmp_dir="$(mktemp -d "${TMPDIR:-/tmp}/fontshare-${_font}.XXXXXX")"
