@@ -163,42 +163,6 @@ Incomplete or missing: 'satoshi' (fontshare) [4/6 file(s) present]
 Removed 6 font file(s) for 'satoshi' (fontshare)
 ```
 
-### How It Works
-
-When a font is installed, `font` writes a manifest listing the path of each file it copied. `list`, `status`, and `uninstall` read these manifests, which means fonts installed some other way are never touched by `status` or `uninstall`.
-
-Manifests are stored per source and font:
-
-```
-~/.local/share/font/<source>/<font>
-```
-
-### `--debug`
-
-Pass `--debug` before or after the subcommand to print debugging information to standard error:
-
-```
-> font --debug install fontshare satoshi
-```
-
-## Configuration
-
-The following environment variables are supported:
-
-| Variable            | Default                                    | Description                                      |
-|:--------------------|:-------------------------------------------|:-------------------------------------------------|
-| `FONT_DIR`          | `~/Library/Fonts`                          | Directory that font files are installed into.    |
-| `FONT_MANIFEST_DIR` | `${XDG_DATA_HOME:-~/.local/share}/font`    | Directory where install manifests are recorded.  |
-| `DEFAULT_SUBCOMMAND`| `help`                                     | Subcommand to run when none is specified.        |
-
-For example, to install fonts system-wide:
-
-```bash
-sudo FONT_DIR=/Library/Fonts font install fontshare satoshi
-```
-
-Use the same `FONT_MANIFEST_DIR` for `install`, `list`, `status`, and `uninstall`, or `font` won't be able to find the manifests it created.
-
 ## Help
 
 ```
