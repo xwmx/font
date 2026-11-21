@@ -1053,6 +1053,46 @@ install() {
       "${_FONT_DIR}"
   }
 
+  # _install_from_homebrew()
+  #
+  # Usage:
+  #   _install_from_homebrew <font> <manifest_file>
+  #
+  # Description:
+  #   Install a font cask with Homebrew and record the cask name in
+  #   `<manifest_file>`. Homebrew manages the font files, so the manifest only
+  #   marks the cask as installed with this program.
+  _install_from_homebrew() {
+    _debug printf "_install_from_homebrew()\\n"
+
+    local _font="${1}"
+    local _manifest_file="${2}"
+
+    if [[ "${_OS}" != "Darwin" ]]
+    then
+      _exit_1 printf "Homebrew font casks are only available on macOS.\\n"
+    fi
+
+    if [[ "${_font}" != font-* ]]
+    then
+      _exit_1 printf "Not a font cask: '%s'. Font casks start with 'font-'.\\n" "${_font}"
+    fi
+
+    mkdir -p "$(dirname "${_manifest_file}")"
+
+    printf "Installing '%s' with homebrew...\n" "${_font}"
+
+    if ! brew install --cask "${_font}"
+    then
+      rm -f "${_manifest_file}"
+      _exit_1 printf "Failed to install '%s' with homebrew.\\n" "${_font}"
+    fi
+
+    printf "%s\n" "${_font}" > "${_manifest_file}"
+
+    printf "Installed '%s' with homebrew\n" "${_font}"
+  }
+
   _debug printf "_install()\\n"
 
   local _arguments=()
@@ -1084,12 +1124,19 @@ install() {
     _exit_1 printf "Usage: %s install <source> <font>\\n" "${_ME}"
   fi
 
+  local _required_commands=(curl unzip)
+
+  if [[ "${_source}" == "homebrew" ]]
+  then
+    _required_commands=(brew)
+  fi
+
   local __command=
-  for   __command in curl unzip
+  for   __command in "${_required_commands[@]}"
   do
     _command_exists "${__command}" ||
       _exit_1 printf "Required command not found: %s\\n" "${__command}"
-    done
+  done
 
   local _manifest_file=
   _manifest_file="$(_font_manifest_path "${_source}" "${_font}")"
@@ -1100,6 +1147,9 @@ install() {
       ;;
     google)
       _install_from_google "${_font}" "${_manifest_file}"
+      ;;
+    homebrew)
+      _install_from_homebrew "${_font}" "${_manifest_file}"
       ;;
     *)
       _exit_1 printf "Unsupported font source: %s\\n" "${_source}"
@@ -1207,14 +1257,14 @@ list() {
   if ((${#_system_dirs[@]}))
   then
     _system_output="$(
-      { find "${_system_dirs[@]}" -type f \(      \
-          -iname "*.otf" -o -iname "*.ttf"        \
-          -o -iname "*.ttc" -o -iname "*.otc"     \
-          -o -iname "*.dfont"                     \
-        \) -print 2>/dev/null || :; }             \
-        | sed -e 's|.*/||'                        \
-        | sort -u                                 \
-        | { grep -E -i -e "${_query:-.}" || :; }  \
+      { find "${_system_dirs[@]}" \( -type f -o -type l \) \( \
+          -iname "*.otf" -o -iname "*.ttf"                    \
+          -o -iname "*.ttc" -o -iname "*.otc"                 \
+          -o -iname "*.dfont"                                 \
+        \) -print 2>/dev/null || :; }                         \
+        | sed -e 's|.*/||'                                    \
+        | sort -u                                             \
+        | { grep -E -i -e "${_query:-.}" || :; }              \
         | sed -e 's/^/  /'
     )"
   fi
@@ -1276,6 +1326,18 @@ status() {
   then
     _debug printf "No manifest found at %s\\n" "${_manifest_file}"
     printf "Not installed: '%s' (%s)\\n" "${_font}" "${_source}" >&2
+    return 1
+  fi
+
+  if [[ "${_source}" == "homebrew" ]]
+  then
+    if _command_exists brew && brew list --cask "${_font}" >/dev/null 2>&1
+    then
+      printf "Installed: '%s' (%s)\\n" "${_font}" "${_source}"
+      return 0
+    fi
+
+    printf "Incomplete or missing: '%s' (%s)\\n" "${_font}" "${_source}" >&2
     return 1
   fi
 
@@ -1365,6 +1427,26 @@ uninstall() {
   if [[ ! -f "${_manifest_file}" ]]
   then
     _exit_1 printf "No manifest found for '%s' from '%s'.\\n" "${_font}" "${_source}"
+  fi
+
+  if [[ "${_source}" == "homebrew" ]]
+  then
+    _command_exists brew ||
+      _exit_1 printf "Required command not found: brew\\n"
+
+    if brew list --cask "${_font}" >/dev/null 2>&1
+    then
+      if ! brew uninstall --cask "${_font}"
+      then
+        _exit_1 printf "Failed to uninstall '%s' with homebrew.\\n" "${_font}"
+      fi
+    fi
+
+    rm -f "${_manifest_file}"
+    rmdir "$(dirname "${_manifest_file}")" 2>/dev/null || true
+
+    printf "Removed '%s' (%s)\n" "${_font}" "${_source}"
+    return 0
   fi
 
   local _installed_path=

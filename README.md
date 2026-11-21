@@ -83,6 +83,8 @@ sudo dnf install curl unzip fontconfig
 sudo pacman -S curl unzip fontconfig
 ```
 
+The `homebrew` source works differently. It requires [Homebrew](http://brew.sh/) instead of `curl` and `unzip`, and is only available on macOS. See [Homebrew Casks](#homebrew-casks-macos).
+
 ### Font Directory
 
 Fonts are installed into the following directory by default:
@@ -97,6 +99,8 @@ To install somewhere else, set the `FONT_DIR` environment variable. For example,
 ```bash
 sudo FONT_DIR=/usr/local/share/fonts font install fontshare satoshi
 ```
+
+`FONT_DIR` does not apply to the `homebrew` source, since Homebrew decides where cask fonts are linked.
 
 ## Usage
 
@@ -128,6 +132,7 @@ Fonts are downloaded as an archive, and every `.otf` and `.ttf` file in the arch
 |:------------|:------------------------------------------------------------|:-------------------------------------|
 | `fontshare` | The font's slug on [Fontshare](https://www.fontshare.com/)  | `font install fontshare general-sans` |
 | `google`    | The family name on [Google Fonts](https://fonts.google.com/) | `font install google "Open Sans"`    |
+| `homebrew`  | The full cask name from [Homebrew's font casks](https://formulae.brew.sh/cask-font/), macOS only | `font install homebrew font-fira-code` |
 
 Quote font names that contain spaces.
 
@@ -136,6 +141,24 @@ Quote font names that contain spaces.
 Downloading 'Open Sans' from google...
 Installed 20 font file(s) for 'Open Sans' into /Users/example/Library/Fonts
 ```
+
+#### Homebrew Casks (macOS)
+
+The `homebrew` source installs fonts from [Homebrew's font casks](https://formulae.brew.sh/cask-font/). Use the full cask name, which always starts with `font-`:
+
+```
+> font install homebrew font-fira-code
+Installing 'font-fira-code' with homebrew...
+...
+Installed 'font-fira-code' with homebrew
+```
+
+Instead of downloading and copying files itself, `font` runs `brew install --cask` and records that the cask was installed with `font`. A few things work differently from the other sources:
+
+- It is only available on macOS, and requires `brew` rather than `curl` and `unzip`.
+- Only font casks are accepted, so names that don't start with `font-` are rejected. This keeps `font` from installing regular applications.
+- Homebrew manages the font files, so [`FONT_DIR`](#font-directory) is ignored.
+- If a cask is already installed, `font install` adopts it, and a later `font uninstall` will remove it.
 
 ### Listing Fonts
 
@@ -155,7 +178,7 @@ Installed on the system:
   ...
 ```
 
-Each entry in the first section is a `<source> <font>` pair, the same values used with `font status` and `font uninstall`. The second section lists font files by file name, and includes fonts that were not installed with `font`.
+Each entry in the first section is a `<source> <font>` pair, the same values used with `font status` and `font uninstall`, such as `homebrew font-fira-code`. The second section lists font files by file name, and includes fonts that were not installed with `font`.
 
 `font list` called with a string or regular expression will show only matching entries. Matching is case-insensitive and uses extended regular expressions:
 
@@ -215,6 +238,13 @@ If some of the installed files have been deleted by hand, `font status` reports 
 Incomplete or missing: 'satoshi' (fontshare) [4/6 file(s) present]
 ```
 
+For the `homebrew` source, `font status` asks Homebrew whether the cask is installed, so there is no file count:
+
+```
+> font status homebrew font-fira-code
+Installed: 'font-fira-code' (homebrew)
+```
+
 ### Uninstalling Fonts
 
 `font uninstall` removes only the files that `font` installed for that font:
@@ -225,6 +255,13 @@ Removed 6 font file(s) for 'satoshi' (fontshare)
 ```
 
 Install records are kept for the user that ran `font install`, so run `font uninstall` the same way you ran `font install`. For example, a font installed with `sudo` is uninstalled with `sudo`.
+
+Fonts from the `homebrew` source are removed with `brew uninstall --cask`:
+
+```
+> font uninstall homebrew font-fira-code
+Removed 'font-fira-code' (homebrew)
+```
 
 ## Help
 
@@ -288,11 +325,12 @@ Description:
 Sources:
   fontshare   Download from Fontshare.
   google      Download from Google Fonts.
+  homebrew    Install a font cask with Homebrew (macOS only).
 
 Exit status:
   0   Font successfully installed.
   1   Invalid parameters, unsupported source, missing dependency
-      (curl or unzip), or download failure.
+      (curl and unzip, or brew for homebrew), or download failure.
 ```
 
 ### `font list`
@@ -319,7 +357,8 @@ Usage:
   font status <source> <font>
 
 Description:
-  Check whether a <font> from <source> is installed.
+  Check whether a <font> from <source> is installed. For homebrew, Homebrew
+  is asked whether the cask is installed.
 
 Exit status:
   0   Font is installed and all files are present.
@@ -347,7 +386,8 @@ Usage:
 
 Description:
   Uninstall a <font> from <source> by removing the files recorded when
-  it was installed.
+  it was installed. For homebrew, the cask is removed with
+  `brew uninstall --cask`.
 
 Exit status:
   0   Font successfully uninstalled.
