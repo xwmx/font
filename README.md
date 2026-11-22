@@ -212,6 +212,44 @@ Some things to keep in mind:
 - Two links with the same file name share one record, so the second install replaces the first.
 - `font install url Example` does not work, since the link itself is needed to download. Use the URL. `font status` and `font uninstall` can use either form.
 
+### Using Options
+
+`font install`, `font status`, and `font uninstall` identify a font with a source and font name, or with a URL. Each of these can also be given as an option with a value:
+
+| Option              | Same as                                    |
+|:--------------------|:-------------------------------------------|
+| `--source <source>` | The `<source>` argument                    |
+| `--font <font>`     | The `<font>` argument                      |
+| `--url <url>`       | A [URL](#installing-from-urls) argument    |
+
+These commands are all equivalent:
+
+```
+font install google "Open Sans"
+font install --source google --font "Open Sans"
+font install --font "Open Sans" --source google
+font install --source google "Open Sans"
+```
+
+as are these:
+
+```
+font status https://fonts.google.com/specimen/Montserrat
+font status --url https://fonts.google.com/specimen/Montserrat
+font status --url=https://fonts.google.com/specimen/Montserrat
+```
+
+Options and arguments can be mixed, since each one fills whichever of the source or font is still missing. `--url` is the exception: it identifies the font by itself, so it can't be combined with a source or font, whether given as an option or an argument.
+
+An option without a value, a `--url` value that isn't a URL, or a `--url` combined with a source or font exits with status `1` and an error message:
+
+```
+> font install --url https://example.com/fonts/Example.zip --source google
+! A URL can't be combined with a source or font.
+```
+
+`font list` also accepts [`--source`](#listing-fonts), which filters the list.
+
 ### Listing Fonts
 
 `font list` shows the fonts installed with `font`, followed by all font files found in the system's font directories:
@@ -390,9 +428,18 @@ Description:
 Usage:
   font install <source> <font>
   font install <url>
+  font install [--source <source>] [--font <font>] [--url <url>]
+
+Options:
+  --font <font>      The font to install, by name.
+  --source <source>  The source to install the font from.
+  --url <url>        The URL of the font to install.
 
 Description:
-  Install a <font> from <source>, or from a font <url>.
+  Install a <font> from <source>, or from a font <url>. The options are
+  equivalent to the arguments and can be mixed with them, so
+  `font install --source google "Open Sans"` also works. --url can't be
+  combined with a source or font.
 
 Sources:
   fontshare   A font from Fontshare, by name.
@@ -412,6 +459,8 @@ Examples:
   font install https://www.fontshare.com/fonts/paquito
   font install https://fonts.google.com/specimen/Montserrat
   font install https://example.com/fonts/Example.zip
+  font install --source google --font "Open Sans"
+  font install --url https://fonts.google.com/specimen/Montserrat
 
 Exit status:
   0   Font successfully installed.
@@ -458,10 +507,18 @@ Exit status:
 Usage:
   font status <source> <font>
   font status <url>
+  font status [--source <source>] [--font <font>] [--url <url>]
+
+Options:
+  --font <font>      The font to check, by name.
+  --source <source>  The source the font was installed from.
+  --url <url>        The URL of the font to check.
 
 Description:
-  Check whether a <font> from <source>, or a font <url>, is installed. For
-  homebrew, Homebrew is asked whether the cask is installed.
+  Check whether a <font> from <source>, or a font <url>, is installed. The
+  options are equivalent to the arguments and can be mixed with them. --url
+  can't be combined with a source or font. For homebrew, Homebrew is asked
+  whether the cask is installed.
 
 Exit status:
   0   Font is installed and all files are present.
@@ -471,6 +528,8 @@ Examples:
   font status fontshare paquito
   font status homebrew font-fira-code
   font status https://fonts.google.com/specimen/Montserrat
+  font status --source fontshare --font paquito
+  font status --url https://fonts.google.com/specimen/Montserrat
 ```
 
 ### `font subcommands`
@@ -492,10 +551,18 @@ Description:
 Usage:
   font uninstall <source> <font>
   font uninstall <url>
+  font uninstall [--source <source>] [--font <font>] [--url <url>]
+
+Options:
+  --font <font>      The font to uninstall, by name.
+  --source <source>  The source the font was installed from.
+  --url <url>        The URL of the font to uninstall.
 
 Description:
   Uninstall a <font> from <source>, or a font <url>, by removing the files
-  recorded when it was installed. For homebrew, the cask is removed with
+  recorded when it was installed. The options are equivalent to the
+  arguments and can be mixed with them. --url can't be combined with a
+  source or font. For homebrew, the cask is removed with
   `brew uninstall --cask`.
 
 Exit status:
@@ -506,6 +573,8 @@ Examples:
   font uninstall fontshare paquito
   font uninstall homebrew font-fira-code
   font uninstall https://fonts.google.com/specimen/Montserrat
+  font uninstall --source fontshare --font paquito
+  font uninstall --url https://fonts.google.com/specimen/Montserrat
 ```
 
 ### `font version`

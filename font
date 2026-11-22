@@ -1045,9 +1045,18 @@ describe "install" <<HEREDOC
 Usage:
   ${_ME} install <source> <font>
   ${_ME} install <url>
+  ${_ME} install [--source <source>] [--font <font>] [--url <url>]
+
+Options:
+  --font <font>      The font to install, by name.
+  --source <source>  The source to install the font from.
+  --url <url>        The URL of the font to install.
 
 Description:
-  Install a <font> from <source>, or from a font <url>.
+  Install a <font> from <source>, or from a font <url>. The options are
+  equivalent to the arguments and can be mixed with them, so
+  \`${_ME} install --source google "Open Sans"\` also works. --url can't be
+  combined with a source or font.
 
 Sources:
   fontshare   A font from Fontshare, by name.
@@ -1067,6 +1076,8 @@ Examples:
   ${_ME} install https://www.fontshare.com/fonts/paquito
   ${_ME} install https://fonts.google.com/specimen/Montserrat
   ${_ME} install https://example.com/fonts/Example.zip
+  ${_ME} install --source google --font "Open Sans"
+  ${_ME} install --url https://fonts.google.com/specimen/Montserrat
 HEREDOC
 install() {
   # _install_from_fontshare()
@@ -1350,11 +1361,26 @@ install() {
   local _font_url=
   local _resolved=
   local _source=
+  local _url=
 
 
   while ((${#}))
   do
     case "${1:-}" in
+      --font|--source|--url)
+        if [[ -z "${2:-}" ]]
+        then
+          _exit_1 printf "%s requires a value.\\n" "${1}"
+        fi
+
+        case "${1}" in
+          --font)   _font="${2}"    ;;
+          --source) _source="${2}"  ;;
+          --url)    _url="${2}"     ;;
+        esac
+
+        shift
+        ;;
       *)
         if [[ -z "${_source:-}" ]]
         then
@@ -1365,10 +1391,26 @@ install() {
         else
           _arguments+=("${1:-}")
         fi
+        ;;
     esac
 
     shift
   done
+
+  if [[ -n "${_url}" ]]
+  then
+    if ! _is_url "${_url}"
+    then
+      _exit_1 printf "Invalid URL: %s\\n" "${_url}"
+    fi
+
+    if [[ -n "${_source}" ]] || [[ -n "${_font}" ]]
+    then
+      _exit_1 printf "A URL can't be combined with a source or font.\\n"
+    fi
+
+    _source="${_url}"
+  fi
 
   if [[ -z "${_font:-}" ]] && _is_url "${_source:-}"
   then
@@ -1382,7 +1424,7 @@ install() {
   if [[ -z "${_source:-}" ]] ||
      [[ -z "${_font:-}"   ]]
   then
-    _exit_1 printf "Usage: %s install ( <source> <font> | <url> )\\n" "${_ME}"
+    _exit_1 printf "Usage: %s install ( <source> <font> | <url> | --source <source> --font <font> | --url <url> )\\n" "${_ME}"
   fi
 
   local _required_commands=(curl unzip)
@@ -1640,10 +1682,18 @@ describe "status" <<HEREDOC
 Usage:
   ${_ME} status <source> <font>
   ${_ME} status <url>
+  ${_ME} status [--source <source>] [--font <font>] [--url <url>]
+
+Options:
+  --font <font>      The font to check, by name.
+  --source <source>  The source the font was installed from.
+  --url <url>        The URL of the font to check.
 
 Description:
-  Check whether a <font> from <source>, or a font <url>, is installed. For
-  homebrew, Homebrew is asked whether the cask is installed.
+  Check whether a <font> from <source>, or a font <url>, is installed. The
+  options are equivalent to the arguments and can be mixed with them. --url
+  can't be combined with a source or font. For homebrew, Homebrew is asked
+  whether the cask is installed.
 
 Exit status:
   0  Font is installed and all files are present.
@@ -1653,16 +1703,33 @@ Examples:
   ${_ME} status fontshare paquito
   ${_ME} status homebrew font-fira-code
   ${_ME} status https://fonts.google.com/specimen/Montserrat
+  ${_ME} status --source fontshare --font paquito
+  ${_ME} status --url https://fonts.google.com/specimen/Montserrat
 HEREDOC
 status() {
   local _arguments=()
   local _font=
   local _resolved=
   local _source=
+  local _url=
 
   while ((${#}))
   do
     case "${1:-}" in
+      --font|--source|--url)
+        if [[ -z "${2:-}" ]]
+        then
+          _exit_1 printf "%s requires a value.\\n" "${1}"
+        fi
+
+        case "${1}" in
+          --font)   _font="${2}"    ;;
+          --source) _source="${2}"  ;;
+          --url)    _url="${2}"     ;;
+        esac
+
+        shift
+        ;;
       *)
         if [[ -z "${_source:-}" ]]
         then
@@ -1679,6 +1746,21 @@ status() {
     shift
   done
 
+  if [[ -n "${_url}" ]]
+  then
+    if ! _is_url "${_url}"
+    then
+      _exit_1 printf "Invalid URL: %s\\n" "${_url}"
+    fi
+
+    if [[ -n "${_source}" ]] || [[ -n "${_font}" ]]
+    then
+      _exit_1 printf "A URL can't be combined with a source or font.\\n"
+    fi
+
+    _source="${_url}"
+  fi
+
   if [[ -z "${_font:-}" ]] && _is_url "${_source:-}"
   then
     _resolved="$(_resolve_font_url "${_source}")"
@@ -1690,7 +1772,7 @@ status() {
   if [[ -z "${_source:-}" ]] ||
      [[ -z "${_font:-}"   ]]
   then
-    _exit_1 printf "Usage: %s status ( <source> <font> | <url> )\\n" "${_ME}"
+    _exit_1 printf "Usage: %s status ( <source> <font> | <url> | --source <source> --font <font> | --url <url> )\\n" "${_ME}"
   fi
 
   if [[ "${_source}" == "homebrew" ]]
@@ -1762,10 +1844,18 @@ describe "uninstall" <<HEREDOC
 Usage:
   ${_ME} uninstall <source> <font>
   ${_ME} uninstall <url>
+  ${_ME} uninstall [--source <source>] [--font <font>] [--url <url>]
+
+Options:
+  --font <font>      The font to uninstall, by name.
+  --source <source>  The source the font was installed from.
+  --url <url>        The URL of the font to uninstall.
 
 Description:
   Uninstall a <font> from <source>, or a font <url>, by removing the files
-  recorded when it was installed. For homebrew, the cask is removed with
+  recorded when it was installed. The options are equivalent to the
+  arguments and can be mixed with them. --url can't be combined with a
+  source or font. For homebrew, the cask is removed with
   \`brew uninstall --cask\`.
 
 Exit status:
@@ -1776,17 +1866,34 @@ Examples:
   ${_ME} uninstall fontshare paquito
   ${_ME} uninstall homebrew font-fira-code
   ${_ME} uninstall https://fonts.google.com/specimen/Montserrat
+  ${_ME} uninstall --source fontshare --font paquito
+  ${_ME} uninstall --url https://fonts.google.com/specimen/Montserrat
 HEREDOC
 uninstall() {
   local _arguments=()
   local _font=
   local _resolved=
   local _source=
+  local _url=
 
 
   while ((${#}))
   do
     case "${1:-}" in
+      --font|--source|--url)
+        if [[ -z "${2:-}" ]]
+        then
+          _exit_1 printf "%s requires a value.\\n" "${1}"
+        fi
+
+        case "${1}" in
+          --font)   _font="${2}"    ;;
+          --source) _source="${2}"  ;;
+          --url)    _url="${2}"     ;;
+        esac
+
+        shift
+        ;;
       *)
         if [[ -z "${_source:-}" ]]
         then
@@ -1797,10 +1904,26 @@ uninstall() {
         else
           _arguments+=("${1:-}")
         fi
+        ;;
     esac
 
     shift
   done
+
+  if [[ -n "${_url}" ]]
+  then
+    if ! _is_url "${_url}"
+    then
+      _exit_1 printf "Invalid URL: %s\\n" "${_url}"
+    fi
+
+    if [[ -n "${_source}" ]] || [[ -n "${_font}" ]]
+    then
+      _exit_1 printf "A URL can't be combined with a source or font.\\n"
+    fi
+
+    _source="${_url}"
+  fi
 
   if [[ -z "${_font:-}" ]] && _is_url "${_source:-}"
   then
@@ -1813,7 +1936,7 @@ uninstall() {
   if [[ -z "${_source:-}" ]] ||
      [[ -z "${_font:-}"   ]]
   then
-    _exit_1 printf "Usage: %s uninstall ( <source> <font> | <url> )\\n" "${_ME}"
+    _exit_1 printf "Usage: %s uninstall ( <source> <font> | <url> | --source <source> --font <font> | --url <url> )\\n" "${_ME}"
   fi
 
   local _manifest_file=
