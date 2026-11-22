@@ -137,7 +137,7 @@ _ME="$(basename "${0}")"
 #
 # Manually set this to to current version of the program. Adhere to the
 # semantic versioning specification: http://semver.org
-_VERSION="0.3.0"
+_VERSION="0.4.0"
 
 # $DEFAULT_SUBCOMMAND
 #
