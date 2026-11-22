@@ -564,12 +564,13 @@ _refresh_font_cache() {
 #   _is_url <string>
 #
 # Exit / Error Status:
-#   0 (success, true)  If <string> starts with `http://` or `https://`.
+#   0 (success, true)  If <string> starts with `http://`, `https://`, or
+#                      `file://`.
 #   1 (error,  false)  If not.
 _is_url() {
   case "${1:-}" in
-    http://*|https://*) return 0 ;;
-    *)                  return 1 ;;
+    http://*|https://*|file://*)  return 0 ;;
+    *)                            return 1 ;;
   esac
 }
 
@@ -598,7 +599,8 @@ _url_decode() {
 #   - Fontshare pages and download links
 #   - Google Fonts specimen pages and download links
 #   - Homebrew cask pages
-#   - Direct links to .zip, .ttf, and .otf files, with source `url`
+#   - Direct links and `file://` URLs to .zip, .ttf, and .otf files, with
+#     source `url`
 _resolve_font_url() {
   local _url="${1}"
   local _rest="${_url#*://}"
@@ -1062,12 +1064,14 @@ Sources:
   fontshare   A font from Fontshare, by name.
   google      A font family from Google Fonts, by name.
   homebrew    A font cask from Homebrew, by cask name. macOS only.
-  url         A direct link to a .zip, .ttf, or .otf file.
+  url         A link to a .zip, .ttf, or .otf file, or a file:// URL for a
+              local file.
 
 URLs:
   Fontshare and Google Fonts pages, Homebrew cask pages, and direct links
-  to .zip, .ttf, or .otf files are recognized, so a <url> can be used
-  anywhere a <source> and <font> are accepted.
+  to .zip, .ttf, or .otf files, including file:// URLs for local files,
+  are recognized, so a <url> can be used anywhere a <source> and <font>
+  are accepted.
 
 Examples:
   ${_ME} install fontshare paquito
@@ -1076,6 +1080,7 @@ Examples:
   ${_ME} install https://www.fontshare.com/fonts/paquito
   ${_ME} install https://fonts.google.com/specimen/Montserrat
   ${_ME} install https://example.com/fonts/Example.zip
+  ${_ME} install file:///Users/example/Downloads/Example.zip
   ${_ME} install --source google --font "Open Sans"
   ${_ME} install --url https://fonts.google.com/specimen/Montserrat
 HEREDOC
@@ -1264,9 +1269,9 @@ install() {
   #   _install_from_url <font> <manifest_file> <url>
   #
   # Description:
-  #   Download a .zip archive or a single .ttf or .otf file from <url>, copy
-  #   font files into `$_FONT_DIR`, and record installed paths in
-  #   `<manifest_file>`.
+  #   Download a .zip archive or a single .ttf or .otf file from <url>, or copy
+  #   it from the local path of a `file://` <url>, copy font files into
+  #   `$_FONT_DIR`, and record installed paths in `<manifest_file>`.
   _install_from_url() {
     _debug printf "_install_from_url()\\n"
 
@@ -1282,6 +1287,7 @@ install() {
     local _url_path="${_url%%[?#]*}"
     local _file_name=
     local _extension=
+    local _local_path=
     local _tmp_download=
     local _tmp_dir=
 
@@ -1297,18 +1303,43 @@ install() {
         ;;
     esac
 
+    if [[ "${_url}" == file://* ]]
+    then
+      _local_path="${_url#file://}"
+      _local_path="${_local_path#localhost}"
+      _local_path="$(_url_decode "${_local_path%%[?#]*}")"
+
+      if [[ "${_local_path}" != /* ]]
+      then
+        _exit_1 printf "Unsupported file URL: %s\\nUse an absolute path, like file:///path/to/Example.zip\\n" "${_url}"
+      fi
+
+      if [[ ! -f "${_local_path}" ]]
+      then
+        _exit_1 printf "File not found: %s\\n" "${_local_path}"
+      fi
+    fi
+
     _tmp_download="$(_temp file ".${_extension}")"
     _tmp_dir="$(_temp file "extracted-${_font}")"
 
     mkdir -p "${_FONT_DIR}" "$(dirname "${_manifest_file}")" "${_tmp_dir}"
 
-    _debug printf "Downloading %s from %s\\n" "${_font}" "${_url}"
-    printf "Downloading '%s' from %s...\n" "${_font}" "${_url}"
-
-    if ! curl -fsSL "${_url}" -o "${_tmp_download}"
+    if [[ -n "${_local_path}" ]]
     then
-      rm -f "${_manifest_file}"
-      _exit_1 printf "Failed to download '%s'.\\n" "${_url}"
+      _debug printf "Copying %s from %s\\n" "${_font}" "${_local_path}"
+      printf "Copying '%s' from %s...\n" "${_font}" "${_local_path}"
+
+      cp -f "${_local_path}" "${_tmp_download}"
+    else
+      _debug printf "Downloading %s from %s\\n" "${_font}" "${_url}"
+      printf "Downloading '%s' from %s...\n" "${_font}" "${_url}"
+
+      if ! curl -fsSL "${_url}" -o "${_tmp_download}"
+      then
+        rm -f "${_manifest_file}"
+        _exit_1 printf "Failed to download '%s'.\\n" "${_url}"
+      fi
     fi
 
     if [[ "${_extension}" == "zip" ]]
@@ -1432,6 +1463,9 @@ install() {
   if [[ "${_source}" == "homebrew" ]]
   then
     _required_commands=(brew)
+  elif [[ "${_font_url}" == file://* ]]
+  then
+    _required_commands=(unzip)
   fi
 
   local __command=

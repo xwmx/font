@@ -135,7 +135,7 @@ A URL can be used in place of a source and font name. See [Installing from URLs]
 | `fontshare` | The font's slug on [Fontshare](https://www.fontshare.com/)  | `font install fontshare general-sans` |
 | `google`    | The family name on [Google Fonts](https://fonts.google.com/) | `font install google "Open Sans"`    |
 | `homebrew`  | The full cask name from [Homebrew's font casks](https://formulae.brew.sh/cask-font/), macOS only | `font install homebrew font-fira-code` |
-| `url`       | A direct link to a `.zip`, `.ttf`, or `.otf` file, see [Installing from URLs](#installing-from-urls) | `font install https://example.com/fonts/Example.zip` |
+| `url`       | A link, or a `file://` URL for a local file, to a `.zip`, `.ttf`, or `.otf` file, see [Installing from URLs](#installing-from-urls) | `font install https://example.com/fonts/Example.zip` |
 
 Quote font names that contain spaces.
 
@@ -173,6 +173,7 @@ Instead of a source and font name, `font install` accepts a URL. `font status` a
 | Google Fonts page      | `https://fonts.google.com/specimen/Montserrat`  | `google`    | `Montserrat`     |
 | Homebrew cask page     | `https://formulae.brew.sh/cask/font-fira-code`  | `homebrew`  | `font-fira-code` |
 | Direct link to a file  | `https://example.com/fonts/Example.zip`         | `url`       | `Example`        |
+| Local file             | `file:///Users/example/Downloads/Example.zip`   | `url`       | `Example`        |
 
 Fontshare and Google Fonts download links are recognized as well. A URL for one of these sources is recorded under that source, exactly as if you had typed the source and font name, so `font install https://www.fontshare.com/fonts/paquito` and `font install fontshare paquito` are equivalent:
 
@@ -209,8 +210,29 @@ Installed with font:
 Some things to keep in mind:
 
 - A URL that isn't recognized, or a direct link to any other type of file, is rejected with an error.
-- Two links with the same file name share one record, so the second install replaces the first.
-- `font install url Example` does not work, since the link itself is needed to download. Use the URL. `font status` and `font uninstall` can use either form.
+- Two links with the same file name, including `file://` URLs, share one record, so the second install replaces the first.
+- `font install url Example` does not work, since the link itself is needed to download or copy the file. Use the URL. `font status` and `font uninstall` can use either form.
+
+#### Local Files
+
+A `file://` URL installs a font file or archive that is already on your computer, such as one you downloaded earlier. The path must be absolute, so the URL starts with `file:///`. Special characters are percent-encoded, so a space is `%20`, and `file://localhost/path` is accepted too:
+
+```
+> font install file:///Users/example/Downloads/Example.zip
+Copying 'Example' from /Users/example/Downloads/Example.zip...
+Installed 2 font file(s) for 'Example' into /Users/example/Library/Fonts
+
+> font install "file:///Users/example/Downloads/My%20Fonts/Solo%20Font.otf"
+Copying 'Solo Font' from /Users/example/Downloads/My Fonts/Solo Font.otf...
+Installed 1 font file(s) for 'Solo Font' into /Users/example/Library/Fonts
+```
+
+The file is copied instead of downloaded, so `curl` isn't needed. Local files are recorded under the `url` source like any other direct link, using the file name without its extension as the font name. A file that doesn't exist, a relative path, or an unsupported file type is rejected with an error:
+
+```
+> font install file:///Users/example/Downloads/Missing.zip
+! File not found: /Users/example/Downloads/Missing.zip
+```
 
 ### Using Options
 
@@ -445,12 +467,14 @@ Sources:
   fontshare   A font from Fontshare, by name.
   google      A font family from Google Fonts, by name.
   homebrew    A font cask from Homebrew, by cask name. macOS only.
-  url         A direct link to a .zip, .ttf, or .otf file.
+  url         A link to a .zip, .ttf, or .otf file, or a file:// URL for a
+              local file.
 
 URLs:
   Fontshare and Google Fonts pages, Homebrew cask pages, and direct links
-  to .zip, .ttf, or .otf files are recognized, so a <url> can be used
-  anywhere a <source> and <font> are accepted.
+  to .zip, .ttf, or .otf files, including file:// URLs for local files,
+  are recognized, so a <url> can be used anywhere a <source> and <font>
+  are accepted.
 
 Examples:
   font install fontshare paquito
@@ -459,6 +483,7 @@ Examples:
   font install https://www.fontshare.com/fonts/paquito
   font install https://fonts.google.com/specimen/Montserrat
   font install https://example.com/fonts/Example.zip
+  font install file:///Users/example/Downloads/Example.zip
   font install --source google --font "Open Sans"
   font install --url https://fonts.google.com/specimen/Montserrat
 
