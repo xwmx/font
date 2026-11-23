@@ -1536,10 +1536,126 @@ install() {
 # ----------------------------------------------------------------------- search
 
 # _json_catalog()
-# Read Fontshare or Google Fonts JSON using one shared, small AWK parser.
-# Modes: search emits name/identifier/page URL; show emits source metadata.
+# Extract Fontshare, Google Fonts, or Homebrew metadata.
+# Fontshare/Google search and show use fast streaming field extraction;
+# Homebrew's small single-cask response uses the general JSON reader below.
 _json_catalog() {
   local _source="${1}" _wanted="${2}" _mode="${3}" _file="${4}"
+
+  # Search needs only the top-level family name/slug. Splitting the minified
+  # catalog at object starts lets awk extract those fields directly, avoiding
+  # a character-by-character walk of the entire nested JSON document.
+  if [[ "${_mode}" == "search" ]]
+  then
+    tr '{' '\012' < "${_file}" | awk -v source="${_source}" '
+      function field(key, line,    pattern, value) {
+        pattern = "\"" key "\"[[:space:]]*:[[:space:]]*\"[^\"]*\""
+        if (!match(line, pattern)) return ""
+        value = substr(line, RSTART, RLENGTH)
+        sub(/^[^:]*:[[:space:]]*"/, "", value)
+        sub(/"$/, "", value)
+        gsub(/\\"/, "\"", value)
+        gsub(/\\\\/, "\\", value)
+        return value
+      }
+      {
+        if (source == "google") {
+          name = field("family", $0)
+          id = name
+          if (name == "") next
+          gsub(/ /, "%20", name)
+          printf "%s\t%s\thttps://fonts.google.com/specimen/%s\n", id, id, name
+        } else {
+          name = field("name", $0)
+          id = field("slug", $0)
+          if (name == "" || id == "") next
+          printf "%s\t%s\thttps://www.fontshare.com/fonts/%s\n", name, id, id
+        }
+      }
+    '
+    return
+  fi
+
+  # For show, stream object fragments instead of constructing every nested
+  # object and walking every character in the catalog. Top-level font records
+  # are identified by their unique slug/family field; nested fragments are
+  # inspected only while the requested record is active.
+  if [[ "${_mode}" == "show" && ( "${_source}" == "fontshare" || "${_source}" == "google" ) ]]
+  then
+    tr '{' '\012' < "${_file}" | awk -v source="${_source}" -v wanted="${_wanted}" '
+      function field(key, line,    pattern, value) {
+        pattern = "\"" key "\"[[:space:]]*:[[:space:]]*(\"[^\"]*\"|[-+]?[0-9]+([.][0-9]+)?|true|false|null)"
+        if (!match(line, pattern)) return ""
+        value = substr(line, RSTART, RLENGTH)
+        sub(/^[^:]*:[[:space:]]*/, "", value)
+        if (substr(value,1,1)=="\"") {
+          sub(/^\"/, "", value); sub(/\"$/, "", value)
+          gsub(/\\\"/, "\"", value)
+          gsub(/\\\\/, "\\", value)
+          gsub(/\\n/, " ", value); gsub(/\\r/, " ", value); gsub(/\\t/, " ", value)
+        }
+        if (value=="null") return ""
+        gsub(/[\t\r\n]/, " ", value)
+        return value
+      }
+      function emit() {
+        if (!active) return
+        if (source == "fontshare")
+          printf "%s\034%s\034%s\034%s\034%s\034%s\034%s\034%s\034%d\034%s\034%s\034%s\n", name, story, category, license, views, recent, publisher, designers, styles, variable, added, slug
+        else
+          printf "%s\034%s\034%s\034%s\034%s\034%d\034%d\034%s\n", name, category, designer, added, updated, styles, axes, description
+        active=0
+      }
+      {
+        if (source == "fontshare") {
+          candidate=field("slug",$0)
+          if (candidate != "") {
+            emit()
+            candidate_name=field("name",$0)
+            active=(tolower(candidate)==tolower(wanted) || tolower(candidate_name)==tolower(wanted))
+            if (active) {
+              name=candidate_name; slug=candidate; story=field("story",$0)
+              category=field("category",$0); license=field("license_type",$0)
+              views=field("views",$0); recent=field("views_recent",$0)
+              variable=(field("is_variable",$0)=="true" ? "yes" : "no")
+              added=field("inserted_at",$0); publisher=""; designers=""; styles=0
+            }
+          } else if (active) {
+            nested_name=field("name",$0)
+            if (nested_name!="") {
+              if (publisher=="") publisher=nested_name
+              else designers=(designers=="" ? nested_name : designers ", " nested_name)
+            }
+            if (field("id",$0)!="") styles++
+            if (story=="") story=field("story",$0)
+            if (category=="") category=field("category",$0)
+            if (license=="") license=field("license_type",$0)
+            if (views=="") views=field("views",$0)
+            if (recent=="") recent=field("views_recent",$0)
+            if (added=="") added=field("inserted_at",$0)
+            if (field("is_variable",$0)=="true") variable="yes"
+          }
+        } else {
+          candidate=field("family",$0)
+          if (candidate!="") {
+            emit()
+            active=(tolower(candidate)==tolower(wanted))
+            if (active) {
+              name=candidate; category=field("category",$0); designer=field("designer",$0)
+              added=field("dateAdded",$0); updated=field("lastModified",$0)
+              description=field("description",$0); styles=0; axes=0
+            }
+          } else if (active) {
+            if (field("filename",$0)!="") styles++
+            if (field("tag",$0)!="") axes++
+          }
+        }
+      }
+      END { emit() }
+    '
+    return
+  fi
+
   local _parser="$(_temp file .awk)" _input_file="${4}"
   if [[ "${_source}" == "google" ]]
   then
@@ -1547,8 +1663,7 @@ _json_catalog() {
     sed '1s/^[^{]*//' "${_file}" > "${_input_file}"
   fi
   cat > "${_parser}" <<'JSON_AWK'
-# Small JSON reader for font catalogs. It scans the collection once, then
-# limits field lookups to the matching font record.
+# Small JSON reader retained for Homebrew's individual cask response.
 function skip_space(s, p) { while (substr(s,p,1) ~ /[ \t\r\n]/) p++; return p }
 function decode_string(s, p,    i,c,e,out) {
   out=""; i=p+1
@@ -1615,10 +1730,12 @@ function first_array_object(array,    p,e) {
   if(p>length(array)) return ""
   e=value_end(array,p); return substr(array,p,e-p)
 }
-function count_field(obj,key,    p,n,found) {
-  p=1; n=0
-  while((found=index(substr(obj,p),"\"" key "\""))>0) { n++; p+=found+length(key)+1 }
-  return n
+function count_field(obj,key,    copy,pattern) {
+  # gsub performs the scan in the AWK implementation rather than repeatedly
+  # allocating progressively shorter substrings (quadratic on large objects).
+  copy=obj
+  pattern="\"" key "\"[ \t\r\n]*:"
+  return gsub(pattern,"",copy)
 }
 function print_search_record(obj,    name,id,url) {
   name=scalar_member(obj, source=="fontshare" ? "name" : "family")
