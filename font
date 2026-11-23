@@ -1571,129 +1571,44 @@ search() {
   _matches_file="$(_temp file .txt)"
 
   # _json_records()
-  # Extract font records from a JSON catalog using POSIX awk. This is a small
-  # JSON reader for the catalog shapes used by these three public APIs; it
-  # handles nested objects/arrays, quoted strings, and JSON escapes.
+  # Fontshare font records expose their identifying fields (name and slug)
+  # before the nested styles/designers metadata. Split at object boundaries and
+  # extract only those two fields instead of recursively parsing every value.
+  # The full recursive parser made unnecessary passes through thousands of
+  # nested style and metadata properties.
   _json_records() {
     local _json_source="${1}"
     local _json_file="${2}"
 
-    awk -v source="${_json_source}" '
-      function ws(    c) {
-        while (p <= n) {
-        c = substr(s, p, 1)
-        if (c == " " || c == "\t" || c == "\r" || c == "\n") p++
-        else break
-        }
-      }
-      function string(    c, e, h, out) {
-        out = ""
-        p++
-        while (p <= n) {
-          c = substr(s, p++, 1)
-          if (c == "\"") break
-          if (c == "\\") {
-            e = substr(s, p++, 1)
-            if      (e == "\"") out = out "\""
-            else if (e == "\\") out = out "\\"
-            else if (e == "/") out = out "/"
-            else if (e == "b") out = out " "
-            else if (e == "f") out = out " "
-            else if (e == "n" || e == "r" || e == "t") out = out " "
-            else if (e == "u") {
-              h = substr(s, p, 4)
-              p += 4
-              if (h ~ /^[0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F]$/ && ("0x" h) + 0 < 128)
-                out = out sprintf("%c", ("0x" h) + 0)
-              else out = out " "
-            }
-          } else out = out c
-        }
-        return out
-      }
-      function value(k, d,    c, key, v, start) {
-        ws()
-        c = substr(s, p, 1)
-        if (c == "{") {
-          p++
-          d++
-          obj[d,"family"] = obj[d,"name"] = obj[d,"title"] = obj[d,"displayName"] = ""
-          obj[d,"token"] = obj[d,"slug"] = obj[d,"id"] = obj[d,"key"] = ""
-          ws()
-          while (p <= n && substr(s, p, 1) != "}") {
-            ws()
-            key = string()
-            ws()
-            if (substr(s, p, 1) == ":") p++
-            value(key, d)
-            ws()
-            c = substr(s, p, 1)
-            if (c == ",") p++
-            else break
+    if [[ "${_json_source}" == "fontshare" ]]
+    then
+      sed 's/},/}\
+/g' "${_json_file}" | awk '
+        {
+          if (match($0, /"slug"[[:space:]]*:[[:space:]]*"[^"\\]*"/)) {
+            slug = substr($0, RSTART, RLENGTH)
+            sub(/^"slug"[[:space:]]*:[[:space:]]*"/, "", slug)
+            sub(/"$/, "", slug)
+          } else slug = ""
+
+          if (match($0, /"name"[[:space:]]*:[[:space:]]*"[^"\\]*"/)) {
+            name = substr($0, RSTART, RLENGTH)
+            sub(/^"name"[[:space:]]*:[[:space:]]*"/, "", name)
+            sub(/"$/, "", name)
+          } else name = ""
+
+          if (slug != "" && name != "") {
+            gsub(/\\\//, "/", name)
+            gsub(/\\n/, " ", name)
+            gsub(/\\t/, " ", name)
+            print name "\t" slug "\thttps://www.fontshare.com/fonts/" slug
           }
-          if (substr(s, p, 1) == "}") p++
-          v = obj[d,"family"]
-          if (v == "") v = obj[d,"name"]
-          if (v == "") v = obj[d,"title"]
-          if (v == "") v = obj[d,"displayName"]
-          if (v != "") {
-            id = obj[d,"token"]
-            if (id == "") id = obj[d,"slug"]
-            if (id == "") id = obj[d,"id"]
-            if (id == "") id = obj[d,"key"]
-            if (id == "") id = v
-            if (source == "homebrew") {
-              if (id ~ /^font-/) print v "\t" id "\thttps://formulae.brew.sh/cask/" id
-            } else if (source == "fontshare") {
-              slug = id
-              if (slug == v) {
-                slug = tolower(v)
-                gsub(/[^a-z0-9]+/, "-", slug)
-                sub(/^-/, "", slug); sub(/-$/, "", slug)
-              }
-              print v "\t" slug "\thttps://www.fontshare.com/fonts/" slug
-            } else {
-              page = v
-              gsub(/ /, "%20", page)
-              print v "\t" v "\thttps://fonts.google.com/specimen/" page
-            }
-          }
-          return
         }
-        if (c == "[") {
-          p++
-          ws()
-          while (p <= n && substr(s, p, 1) != "]") {
-            value(k, d)
-            ws()
-            if (substr(s, p, 1) == ",") p++
-            else break
-            ws()
-          }
-          if (substr(s, p, 1) == "]") p++
-          return
-        }
-        if (c == "\"") {
-          v = string()
-          if (k == "name" || k == "family" || k == "title" || k == "displayName") {
-            if (obj[d,k] != "") obj[d,k] = obj[d,k] " / " v
-            else obj[d,k] = v
-          } else if (k == "token" || k == "slug" || k == "id" || k == "key") obj[d,k] = v
-          return
-        }
-        start = p
-        while (p <= n && substr(s, p, 1) !~ /[},][ \t\r\n]*/) p++
-        if (p == start) p++
-      }
-      {
-        s = s $0 "\n"
-      }
-      END {
-        n = length(s)
-        p = 1
-        value("", 0)
-      }
-    ' "${_json_file}"
+      '
+      return
+    fi
+
+    return 0
   }
 
   # _show_matches()
@@ -1721,11 +1636,39 @@ search() {
     done < "${_matches_file}"
   }
 
-  # Homebrew's font listing is a dedicated HTML page. The JSON API only
-  # exposes the entire cask catalog, so use the smaller font-only listing.
-  if curl -fsSL --connect-timeout 10 --max-time 30 \
-    "https://formulae.brew.sh/cask-font/" -o "${_catalog_file}"
-  then
+  # Fetch independent catalogs concurrently so network latency is shared.
+  local _homebrew_file=$(_temp file .html)
+  local _fontshare_file=$(_temp file .json)
+  local _google_file=$(_temp file .json)
+  local _fontshare_records=$(_temp file .txt)
+  local _page_file=
+  local _page_records=
+  local _count_total=0
+  local _max_offset=0
+  local _batch_offset=0
+  local _page_offset=0
+  local _pids=()
+  local _page_files=()
+  local _page_records_files=()
+  local _page_index=0
+  local _pid=
+
+  printf "Searching catalogs...\n" 1>&2
+  curl -fsSL --connect-timeout 3 --max-time 8 \
+    "https://formulae.brew.sh/cask-font/" -o "${_homebrew_file}" &
+  local _homebrew_pid=$!
+  curl -fsSL --compressed --connect-timeout 3 --max-time 8 \
+    "https://fonts.google.com/metadata/fonts" -o "${_google_file}" &
+  local _google_pid=$!
+  # Fontshare currently exposes a small catalog (about 100 families). Request
+  # it in one response rather than paging through it; the larger page size also
+  # avoids a second round-trip if the catalog grows modestly.
+  curl -fsSL --compressed --connect-timeout 3 --max-time 8 \
+    "https://api.fontshare.com/v2/fonts?limit=1000&offset=0" -o "${_fontshare_file}" &
+  local _fontshare_pid=$!
+
+  # Homebrew's font listing is a dedicated HTML page.
+  if wait "${_homebrew_pid}"; then
     awk '
       function cell_text(value) {
         gsub(/<[^>]*>/, "", value)
@@ -1735,17 +1678,6 @@ search() {
         gsub(/&nbsp;/, " ", value)
         return value
       }
-      function field(row, tag,    start, rest, stop) {
-        start = index(row, "<" tag)
-        if (!start) return ""
-        rest = substr(row, start)
-        start = index(rest, ">")
-        if (!start) return ""
-        rest = substr(rest, start + 1)
-        stop = index(rest, "</" tag ">")
-        if (!stop) return ""
-        return cell_text(substr(rest, 1, stop - 1))
-      }
       {
         row = row $0
         if (index(row, "</tr>") == 0) next
@@ -1754,7 +1686,6 @@ search() {
         sub(/".*$/, "", token)
         if (token ~ /^font-/) {
           name = row
-          # The final table cell contains the human-readable font name.
           while (match(name, /<td[^>]*>/)) {
             name = substr(name, RSTART + RLENGTH)
             stop = index(name, "</td>")
@@ -1768,48 +1699,28 @@ search() {
         row = ""
         last = ""
       }
-    ' "${_catalog_file}" > "${_records_file}"
+    ' "${_homebrew_file}" > "${_records_file}"
   else
     _warn printf "homebrew: unable to fetch font listing\n"
     : > "${_records_file}"
   fi
   _show_matches "Homebrew"
 
-  # Fontshare's catalog is paginated. Limit each request and cap the number
-  # of pages so a changed API cannot leave the command running indefinitely.
-  : > "${_records_file}"
-  _offset=0
-  _page=0
-  while ((_page < 20))
-  do
-    _url="https://api.fontshare.com/v2/fonts?limit=100&offset=${_offset}"
-    if ! curl -fsSL --connect-timeout 10 --max-time 30 "${_url}" -o "${_catalog_file}"
-    then
-      if ((_offset == 0)); then _warn printf "fontshare: unable to fetch catalog\n"; fi
-      break
-    fi
-    _json_records fontshare "${_catalog_file}" > "${_matches_file}"
-    _page_count="$(wc -l < "${_matches_file}" | tr -d ' ')"
-    cat "${_matches_file}" >> "${_records_file}"
-    ((_page_count < 100)) && break
-    _offset=$((_offset + 100))
-    _page=$((_page + 1))
-  done
+  # The Fontshare API currently returns its complete catalog in one response.
+  # Keeping this to one request avoids serial page discovery and pagination
+  # latency on every search.
+  : > "${_fontshare_records}"
+  if wait "${_fontshare_pid}"; then
+    _json_records fontshare "${_fontshare_file}" > "${_fontshare_records}"
+  else
+    _warn printf "fontshare: unable to fetch catalog (request timed out or failed)\n"
+  fi
+  cp "${_fontshare_records}" "${_records_file}"
   _show_matches "Fontshare"
 
   # Google Fonts prefixes its JSON response with an anti-hijacking marker.
-  # Compression reduces the catalog transfer, and the timeout bounds delays.
-  printf "Searching Google Fonts...\n" 1>&2
-  if ! curl -fsSL --compressed --connect-timeout 10 --max-time 30 "https://fonts.google.com/metadata/fonts" -o "${_catalog_file}"
-  then
-    _warn printf "google: unable to fetch catalog\n"
-    : > "${_records_file}"
-  else
-    # Google Fonts metadata is much larger than the other catalogs. Its family
-    # names are available directly in the top-level familyMetadataList, so
-    # extract those fields as a stream instead of passing the entire document
-    # through the recursive JSON reader.
-    sed '1s/^[^{]*//' "${_catalog_file}" | awk '
+  if wait "${_google_pid}"; then
+    sed '1s/^[^{]*//' "${_google_file}" | awk '
       function decode(value,    out, i, c, e) {
         out = ""
         for (i = 1; i <= length(value); i++) {
@@ -1840,6 +1751,9 @@ search() {
         }
       }
     ' > "${_records_file}"
+  else
+    _warn printf "google: unable to fetch catalog\n"
+    : > "${_records_file}"
   fi
   _show_matches "Google"
 
