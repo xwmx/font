@@ -1798,14 +1798,48 @@ search() {
   _show_matches "Fontshare"
 
   # Google Fonts prefixes its JSON response with an anti-hijacking marker.
-  if ! curl -fsSL --connect-timeout 10 --max-time 30 "https://fonts.google.com/metadata/fonts" -o "${_catalog_file}"
+  # Compression reduces the catalog transfer, and the timeout bounds delays.
+  printf "Searching Google Fonts...\n" 1>&2
+  if ! curl -fsSL --compressed --connect-timeout 10 --max-time 30 "https://fonts.google.com/metadata/fonts" -o "${_catalog_file}"
   then
     _warn printf "google: unable to fetch catalog\n"
     : > "${_records_file}"
   else
-    sed '1s/^[^{]*//' "${_catalog_file}" > "${_records_file}"
-    _json_records google "${_records_file}" > "${_matches_file}"
-    mv "${_matches_file}" "${_records_file}"
+    # Google Fonts metadata is much larger than the other catalogs. Its family
+    # names are available directly in the top-level familyMetadataList, so
+    # extract those fields as a stream instead of passing the entire document
+    # through the recursive JSON reader.
+    sed '1s/^[^{]*//' "${_catalog_file}" | awk '
+      function decode(value,    out, i, c, e) {
+        out = ""
+        for (i = 1; i <= length(value); i++) {
+          c = substr(value, i, 1)
+          if (c == "\\") {
+            e = substr(value, ++i, 1)
+            if      (e == "\"") out = out "\""
+            else if (e == "\\") out = out "\\"
+            else if (e == "/") out = out "/"
+            else if (e == "n" || e == "r" || e == "t") out = out " "
+            else out = out e
+          } else out = out c
+        }
+        return out
+      }
+      BEGIN { RS = "," }
+      {
+        if (match($0, /"family"[[:space:]]*:[[:space:]]*"[^"\\]*"/)) {
+          field = substr($0, RSTART, RLENGTH)
+          sub(/^"family"[[:space:]]*:[[:space:]]*"/, "", field)
+          sub(/"$/, "", field)
+          name = decode(field)
+          if (name != "") {
+            page = name
+            gsub(/ /, "%20", page)
+            print name "\t" name "\thttps://fonts.google.com/specimen/" page
+          }
+        }
+      }
+    ' > "${_records_file}"
   fi
   _show_matches "Google"
 
