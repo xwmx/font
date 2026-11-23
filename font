@@ -1614,6 +1614,7 @@ _json_catalog() {
             candidate_name=field("name",$0)
             active=(tolower(candidate)==tolower(wanted) || tolower(candidate_name)==tolower(wanted))
             if (active) {
+              found=1
               name=candidate_name; slug=candidate; story=field("story",$0)
               category=field("category",$0); license=field("license_type",$0)
               views=field("views",$0); recent=field("views_recent",$0)
@@ -1641,6 +1642,7 @@ _json_catalog() {
             emit()
             active=(tolower(candidate)==tolower(wanted))
             if (active) {
+              found=1
               name=candidate; category=field("category",$0); designer=field("designer",$0)
               added=field("dateAdded",$0); updated=field("lastModified",$0)
               description=field("description",$0); styles=0; axes=0
@@ -1651,9 +1653,9 @@ _json_catalog() {
           }
         }
       }
-      END { emit() }
+      END { emit(); if (!found) exit 1 }
     '
-    return
+    return $?
   fi
 
   local _parser="$(_temp file .awk)" _input_file="${4}"
@@ -1718,9 +1720,14 @@ function object_member(obj,key,    p,k,v,e) {
   }
   return ""
 }
-function scalar_member(obj,key,    v) {
+function scalar_member(obj,key,    v,p,e) {
   v=object_member(obj,key); if(v=="") return ""
   if(substr(v,1,1)=="\"") return decode_string(v,1)
+  if(substr(v,1,1)=="[") {
+    p=skip_space(v,2)
+    if(substr(v,p,1)=="\"") return decode_string(v,p)
+    return ""
+  }
   if(v=="null") return ""
   return v
 }
@@ -2120,8 +2127,21 @@ show() {
     if _local_path="$(_find_installed_font "${_font}")"; then
       _source=local
     else
-      # Resolve a catalog name against Fontshare and Google Fonts in parallel.
-      # Homebrew is checked last because its cask API requires a cask token.
+      # A Homebrew cask token is unambiguous. Check it before font-family
+      # catalogs so a token such as font-meslo-for-powerline cannot be
+      # mistaken for a Fontshare slug or another similarly named family.
+      if [[ "${_font}" == font-* ]]; then
+        _brew_file="$(_temp file .json)"
+        if curl -fsSL --compressed --connect-timeout 3 --max-time 8 \
+          "https://formulae.brew.sh/api/cask/${_font}.json" -o "${_brew_file}"; then
+          if _metadata_line="$(_json_catalog homebrew "${_font}" show "${_brew_file}")"; then
+            _source=homebrew
+          fi
+        fi
+      fi
+
+      # Resolve remaining names against Fontshare and Google Fonts in parallel.
+      if [[ -z "${_source}" ]]; then
       _fontshare_file="$(_temp file .json)"
       _google_file="$(_temp file .json)"
       curl -fsSL --compressed --connect-timeout 3 --max-time 8 \
@@ -2171,6 +2191,7 @@ show() {
             _font="${_candidate}"
           fi
         fi
+      fi
       fi
     fi
   fi
@@ -2229,12 +2250,14 @@ show() {
       _download_url="https://fonts.google.com/download?family=${_name// /%20}"
       ;;
     homebrew)
-      _brew_file="$(_temp file .json)"
-      curl -fsSL --compressed --connect-timeout 3 --max-time 8 \
-        "https://formulae.brew.sh/api/cask/${_font}.json" -o "${_brew_file}" ||
-        _exit_1 printf 'Homebrew cask not found: %s\n' "${_font}"
-      _metadata_line="$(_json_catalog homebrew "${_font}" show "${_brew_file}")" ||
-        _exit_1 printf 'Unable to read Homebrew cask metadata: %s\n' "${_font}"
+      if [[ -z "${_metadata_line}" ]]; then
+        _brew_file="$(_temp file .json)"
+        curl -fsSL --compressed --connect-timeout 3 --max-time 8 \
+          "https://formulae.brew.sh/api/cask/${_font}.json" -o "${_brew_file}" ||
+          _exit_1 printf 'Homebrew cask not found: %s\n' "${_font}"
+        _metadata_line="$(_json_catalog homebrew "${_font}" show "${_brew_file}")" ||
+          _exit_1 printf 'Unable to read Homebrew cask metadata: %s\n' "${_font}"
+      fi
       IFS=$'\034' read -r _name _description _homepage _download_url _version _views <<< "${_metadata_line}"
       _page_url="https://formulae.brew.sh/cask/${_font}"
       ;;
