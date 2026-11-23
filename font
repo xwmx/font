@@ -1139,8 +1139,7 @@ install() {
 
     : > "${_manifest_file}"
 
-    local _count=0
-    local _base_name=
+      local _base_name=
     local _dest_path=
     local _font_file=
 
@@ -1208,8 +1207,7 @@ install() {
 
     : > "${_manifest_file}"
 
-    local _count=0
-    local _base_name=
+      local _base_name=
     local _dest_path=
     local _font_file=
 
@@ -1370,8 +1368,7 @@ install() {
 
     : > "${_manifest_file}"
 
-    local _count=0
-    local _base_name=
+      local _base_name=
     local _dest_path=
     local _font_file=
 
@@ -1526,6 +1523,9 @@ Description:
   case-insensitive. Results include the source, install command, and catalog
   URL.
 
+Requirements:
+  curl, grep, awk, sed
+
 Examples:
   ${_ME} search "space grotesk"
   ${_ME} search "^(space|clash)"
@@ -1534,171 +1534,242 @@ HEREDOC
 search() {
   if (($# == 0))
   then
-    _exit_1 printf "Usage: %s search <string-or-regex>\\n" "${_ME}"
+    _exit_1 printf "Usage: %s search <string-or-regex>\n" "${_ME}"
   fi
 
   local _query="$*"
+  local _catalog_file=
+  local _records_file=
+  local _matches_file=
+  local _source=
+  local _url=
+  local _offset=0
+  local _total=0
+  local _name=
+  local _identifier=
+  local _page_url=
+  local _command=
+  local _grep_status=0
+  local __required_commands=(curl grep awk sed)
+  local __command=
 
-  _command_exists python3 ||
-    _exit_1 printf "Required command not found: python3\\n"
+  for __command in "${__required_commands[@]}"
+  do
+    _command_exists "${__command}" ||
+      _exit_1 printf "Required command not found: %s\n" "${__command}"
+  done
 
-  FONT_SEARCH_QUERY="${_query}" FONT_SEARCH_COMMAND="${_ME}" python3 - <<'PY'
-import json
-import os
-import re
-import sys
-import urllib.error
-import urllib.parse
-import urllib.request
+  # Validate the expression before making network requests.
+  printf "" | grep -E -i -e "${_query}" >/dev/null 2>&1 || _grep_status=$?
+  if ((_grep_status == 2))
+  then
+    _exit_1 printf "Invalid search pattern: %s\n" "${_query}"
+  fi
 
-query = os.environ["FONT_SEARCH_QUERY"]
-command_name = os.environ["FONT_SEARCH_COMMAND"]
+  _catalog_file="$(_temp file .json)"
+  _records_file="$(_temp file .txt)"
+  _matches_file="$(_temp file .txt)"
 
-try:
-    pattern = re.compile(query, re.IGNORECASE)
-except re.error as error:
-    print(f"Invalid search pattern: {error}", file=sys.stderr)
-    sys.exit(1)
+  # _json_records()
+  # Extract font records from a JSON catalog using POSIX awk. This is a small
+  # JSON reader for the catalog shapes used by these three public APIs; it
+  # handles nested objects/arrays, quoted strings, and JSON escapes.
+  _json_records() {
+    local _json_source="${1}"
+    local _json_file="${2}"
 
-sources = (
-    (
-        "homebrew",
-        "https://formulae.brew.sh/api/cask-font.json",
-    ),
-    (
-        "fontshare",
-        "https://api.fontshare.com/v2/fonts?limit=100&offset=0",
-    ),
-    (
-        "google",
-        "https://fonts.google.com/metadata/fonts",
-    ),
-)
+    awk -v source="${_json_source}" '
+      function ws(    c) {
+        while (p <= n) {
+        c = substr(s, p, 1)
+        if (c == " " || c == "\t" || c == "\r" || c == "\n") p++
+        else break
+        }
+      }
+      function string(    c, e, h, out) {
+        out = ""
+        p++
+        while (p <= n) {
+          c = substr(s, p++, 1)
+          if (c == "\"") break
+          if (c == "\\") {
+            e = substr(s, p++, 1)
+            if      (e == "\"") out = out "\""
+            else if (e == "\\") out = out "\\"
+            else if (e == "/") out = out "/"
+            else if (e == "b") out = out " "
+            else if (e == "f") out = out " "
+            else if (e == "n" || e == "r" || e == "t") out = out " "
+            else if (e == "u") {
+              h = substr(s, p, 4)
+              p += 4
+              if (h ~ /^[0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F]$/ && ("0x" h) + 0 < 128)
+                out = out sprintf("%c", ("0x" h) + 0)
+              else out = out " "
+            }
+          } else out = out c
+        }
+        return out
+      }
+      function value(k, d,    c, key, v, start) {
+        ws()
+        c = substr(s, p, 1)
+        if (c == "{") {
+          p++
+          d++
+          obj[d,"family"] = obj[d,"name"] = obj[d,"title"] = obj[d,"displayName"] = ""
+          obj[d,"token"] = obj[d,"slug"] = obj[d,"id"] = obj[d,"key"] = ""
+          ws()
+          while (p <= n && substr(s, p, 1) != "}") {
+            ws()
+            key = string()
+            ws()
+            if (substr(s, p, 1) == ":") p++
+            value(key, d)
+            ws()
+            c = substr(s, p, 1)
+            if (c == ",") p++
+            else break
+          }
+          if (substr(s, p, 1) == "}") p++
+          v = obj[d,"family"]
+          if (v == "") v = obj[d,"name"]
+          if (v == "") v = obj[d,"title"]
+          if (v == "") v = obj[d,"displayName"]
+          if (v != "") {
+            id = obj[d,"token"]
+            if (id == "") id = obj[d,"slug"]
+            if (id == "") id = obj[d,"id"]
+            if (id == "") id = obj[d,"key"]
+            if (id == "") id = v
+            if (source == "homebrew") {
+              if (id ~ /^font-/) print v "\t" id "\thttps://formulae.brew.sh/cask/" id
+            } else if (source == "fontshare") {
+              slug = id
+              if (slug == v) {
+                slug = tolower(v)
+                gsub(/[^a-z0-9]+/, "-", slug)
+                sub(/^-/, "", slug); sub(/-$/, "", slug)
+              }
+              print v "\t" slug "\thttps://www.fontshare.com/fonts/" slug
+            } else {
+              page = v
+              gsub(/ /, "%20", page)
+              print v "\t" v "\thttps://fonts.google.com/specimen/" page
+            }
+          }
+          return
+        }
+        if (c == "[") {
+          p++
+          ws()
+          while (p <= n && substr(s, p, 1) != "]") {
+            value(k, d)
+            ws()
+            if (substr(s, p, 1) == ",") p++
+            else break
+            ws()
+          }
+          if (substr(s, p, 1) == "]") p++
+          return
+        }
+        if (c == "\"") {
+          v = string()
+          if (k == "name" || k == "family" || k == "title" || k == "displayName") {
+            if (obj[d,k] != "") obj[d,k] = obj[d,k] " / " v
+            else obj[d,k] = v
+          } else if (k == "token" || k == "slug" || k == "id" || k == "key") obj[d,k] = v
+          return
+        }
+        start = p
+        while (p <= n && substr(s, p, 1) !~ /[},][ \t\r\n]*/) p++
+        if (p == start) p++
+      }
+      {
+        s = s $0 "\n"
+      }
+      END {
+        n = length(s)
+        p = 1
+        value("", 0)
+      }
+    ' "${_json_file}"
+  }
 
-def fetch(url):
-    request = urllib.request.Request(
-        url,
-        headers={"User-Agent": "font-cli/1.0"},
-    )
-    with urllib.request.urlopen(request, timeout=30) as response:
-        content = response.read().decode("utf-8-sig")
-    # Google Fonts' metadata endpoint uses an anti-JSON-hijacking prefix.
-    content = content[content.find("{"):] if content.lstrip().startswith(")]}'") else content
-    return json.loads(content)
+  # _show_matches()
+  # Apply the expression and print the common result format for one source.
+  _show_matches() {
+    local _show_source="${1}"
+    : > "${_matches_file}"
+    grep -E -i -e "${_query}" "${_records_file}" > "${_matches_file}" || :
+    printf "%s:\n" "${_show_source}"
+    if [[ ! -s "${_matches_file}" ]]
+    then
+      printf "  (no matches)\n"
+      return 0
+    fi
+    while IFS=$'\t' read -r _name _identifier _page_url
+    do
+      [[ -n "${_name}" ]] || continue
+      case "${_show_source}" in
+        Homebrew) _command="${_ME} install homebrew ${_identifier}" ;;
+        Fontshare) _command="${_ME} install fontshare ${_identifier}" ;;
+        Google) printf -v _command '%s install google %q' "${_ME}" "${_identifier}" ;;
+      esac
+      printf "  %s\n    %s\n    %s\n" "${_name}" "${_command}" "${_page_url}"
+      _total=$((_total + 1))
+    done < "${_matches_file}"
+  }
 
-def records(data):
-    if isinstance(data, list):
-        return data
-    if isinstance(data, dict):
-        for key in ("fonts", "items", "data", "results", "familyMetadataList"):
-            value = data.get(key)
-            if isinstance(value, list):
-                return value
-        # Some catalog responses wrap the list one level deeper.
-        for value in data.values():
-            if isinstance(value, dict):
-                result = records(value)
-                if result:
-                    return result
-    return []
+  # Homebrew publishes a dedicated font-cask catalog. Fall back to the full
+  # cask catalog for older Homebrew API versions.
+  if ! curl -fsSL "https://formulae.brew.sh/api/cask-font.json" -o "${_catalog_file}"
+  then
+    if ! curl -fsSL "https://formulae.brew.sh/api/cask.json" -o "${_catalog_file}"
+    then
+      _warn printf "homebrew: unable to fetch catalog\n"
+      : > "${_records_file}"
+    else
+      _json_records homebrew "${_catalog_file}" > "${_records_file}"
+    fi
+  else
+    _json_records homebrew "${_catalog_file}" > "${_records_file}"
+  fi
+  _show_matches "Homebrew"
 
-def first(record, *keys):
-    for key in keys:
-        value = record.get(key)
-        if isinstance(value, str) and value:
-            return value
-    return ""
+  # Fontshare's catalog is paginated.
+  : > "${_records_file}"
+  _offset=0
+  while :
+  do
+    _url="https://api.fontshare.com/v2/fonts?limit=100&offset=${_offset}"
+    if ! curl -fsSL "${_url}" -o "${_catalog_file}"
+    then
+      if ((_offset == 0)); then _warn printf "fontshare: unable to fetch catalog\n"; fi
+      break
+    fi
+    _json_records fontshare "${_catalog_file}" >> "${_records_file}"
+    # The API uses pages of 100. Stop after a short page; the record count
+    # from the current response is obtained separately to preserve pagination.
+    _page_count="$(_json_records fontshare "${_catalog_file}" | wc -l | tr -d ' ')"
+    [[ "${_page_count}" -lt 100 ]] && break
+    _offset=$((_offset + 100))
+  done
+  _show_matches "Fontshare"
 
-def search_homebrew(data):
-    for item in records(data):
-        token = first(item, "token")
-        # The general Homebrew cask API is also supported as a fallback.
-        if not token.startswith("font-"):
-            continue
-        names = item.get("name", [])
-        if isinstance(names, list):
-            display = " / ".join(str(name) for name in names)
-        else:
-            display = str(names or "")
-        if not token:
-            continue
-        label = display or token
-        if pattern.search(label) or pattern.search(token):
-            yield (label, token, f"https://formulae.brew.sh/cask/{token}")
+  # Google Fonts prefixes its JSON response with an anti-hijacking marker.
+  if ! curl -fsSL "https://fonts.google.com/metadata/fonts" -o "${_catalog_file}"
+  then
+    _warn printf "google: unable to fetch catalog\n"
+    : > "${_records_file}"
+  else
+    sed '1s/^[^{]*//' "${_catalog_file}" > "${_records_file}"
+    _json_records google "${_records_file}" > "${_matches_file}"
+    mv "${_matches_file}" "${_records_file}"
+  fi
+  _show_matches "Google"
 
-def search_fontshare(data):
-    for item in records(data):
-        name = first(item, "family", "name", "title")
-        slug = first(item, "slug", "id", "key")
-        if not name:
-            continue
-        if not slug:
-            slug = re.sub(r"[^a-z0-9]+", "-", name.lower()).strip("-")
-        if pattern.search(name) or pattern.search(slug):
-            yield (name, slug, f"https://www.fontshare.com/fonts/{slug}")
-
-def search_google(data):
-    for item in records(data):
-        name = first(item, "family", "name", "displayName")
-        if not name:
-            continue
-        if pattern.search(name):
-            url = "https://fonts.google.com/specimen/" + urllib.parse.quote(name, safe="")
-            yield (name, name, url)
-
-searchers = {
-    "homebrew": search_homebrew,
-    "fontshare": search_fontshare,
-    "google": search_google,
-}
-
-total = 0
-for source, url in sources:
-    try:
-        if source == "homebrew":
-            try:
-                catalog = fetch(url)
-            except Exception:
-                catalog = fetch("https://formulae.brew.sh/api/cask.json")
-        elif source == "fontshare":
-            catalog = fetch(url)
-            all_records = records(catalog)
-            total_records = catalog.get("count_total", len(all_records)) if isinstance(catalog, dict) else len(all_records)
-            offset = len(all_records)
-            while offset < total_records and all_records:
-                page = fetch(f"https://api.fontshare.com/v2/fonts?limit=100&offset={offset}")
-                page_records = records(page)
-                if not page_records:
-                    break
-                all_records.extend(page_records)
-                offset += len(page_records)
-            catalog = all_records
-        else:
-            catalog = fetch(url)
-        matches = sorted(searchers[source](catalog), key=lambda result: result[0].casefold())
-    except Exception as error:
-        print(f"{source}: unable to search catalog ({error})", file=sys.stderr)
-        continue
-
-    print(f"{source.capitalize()}:")
-    if not matches:
-        print("  (no matches)")
-        continue
-
-    for name, identifier, page_url in matches:
-        if source == "homebrew":
-            command = f"{command_name} install homebrew {identifier}"
-        elif source == "fontshare":
-            command = f"{command_name} install fontshare {identifier}"
-        else:
-            command = f'{command_name} install google "{identifier}"'
-        print(f"  {name}")
-        print(f"    {command}")
-        print(f"    {page_url}")
-        total += 1
-
-print(f"\n{total} match(es)")
-PY
+  printf "\n%s match(es)\n" "${_total}"
 }
 
 # ------------------------------------------------------------------------ list
