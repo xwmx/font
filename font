@@ -1535,6 +1535,160 @@ install() {
 
 # ----------------------------------------------------------------------- search
 
+# _json_catalog()
+# Read Fontshare or Google Fonts JSON using one shared, small AWK parser.
+# Modes: search emits name/identifier/page URL; show emits source metadata.
+_json_catalog() {
+  local _source="${1}" _wanted="${2}" _mode="${3}" _file="${4}"
+  local _parser="$(_temp file .awk)" _input_file="${4}"
+  if [[ "${_source}" == "google" ]]
+  then
+    _input_file="$(_temp file .json)"
+    sed '1s/^[^{]*//' "${_file}" > "${_input_file}"
+  fi
+  cat > "${_parser}" <<'JSON_AWK'
+# Small JSON reader for font catalogs. It scans the collection once, then
+# limits field lookups to the matching font record.
+function skip_space(s, p) { while (substr(s,p,1) ~ /[ \t\r\n]/) p++; return p }
+function decode_string(s, p,    i,c,e,out) {
+  out=""; i=p+1
+  while (i<=length(s)) {
+    c=substr(s,i,1)
+    if (c=="\\") {
+      e=substr(s,i+1,1); i+=2
+      if      (e=="n" || e=="r" || e=="t") out=out " "
+      else if (e=="b" || e=="f") out=out " "
+      else if (e=="u") { out=out "\\u" substr(s,i,4); i+=4 }
+      else out=out e
+    } else if (c=="\"") return out
+    else { out=out c; i++ }
+  }
+  return out
+}
+function value_end(s,p,    i,c,q,esc,depth) {
+  p=skip_space(s,p); c=substr(s,p,1)
+  if (c=="\"") {
+    i=p+1; esc=0
+    for (;i<=length(s);i++) { c=substr(s,i,1); if (esc) esc=0; else if(c=="\\") esc=1; else if(c=="\"") return i+1 }
+    return length(s)+1
+  }
+  if (c=="{" || c=="[") {
+    depth=1; q=0; esc=0
+    for(i=p+1;i<=length(s);i++) {
+      c=substr(s,i,1)
+      if(q) { if(esc) esc=0; else if(c=="\\") esc=1; else if(c=="\"") q=0; continue }
+      if(c=="\"") q=1
+      else if(c=="{" || c=="[") depth++
+      else if(c=="}" || c=="]") { depth--; if(depth==0) return i+1 }
+    }
+    return length(s)+1
+  }
+  i=p
+  while(i<=length(s)) {
+    c=substr(s,i,1)
+    if(c=="," || c=="}" || c=="]" || c~/[ \t\r\n]/) break
+    i++
+  }
+  return i
+}
+function object_member(obj,key,    p,k,v,e) {
+  p=skip_space(obj,2)
+  while(p<=length(obj) && substr(obj,p,1)!="}") {
+    if(substr(obj,p,1)!= "\"") return ""
+    k=decode_string(obj,p); p=value_end(obj,p); p=skip_space(obj,p)
+    if(substr(obj,p,1)!=":") return ""
+    p=skip_space(obj,p+1); e=value_end(obj,p); v=substr(obj,p,e-p)
+    if(k==key) return v
+    p=skip_space(obj,e); if(substr(obj,p,1)==",") p=skip_space(obj,p+1); else break
+  }
+  return ""
+}
+function scalar_member(obj,key,    v) {
+  v=object_member(obj,key); if(v=="") return ""
+  if(substr(v,1,1)=="\"") return decode_string(v,1)
+  if(v=="null") return ""
+  return v
+}
+function first_array_object(array,    p,e) {
+  p=skip_space(array,2)
+  while(p<=length(array) && substr(array,p,1)!="{") p++
+  if(p>length(array)) return ""
+  e=value_end(array,p); return substr(array,p,e-p)
+}
+function count_field(obj,key,    p,n,found) {
+  p=1; n=0
+  while((found=index(substr(obj,p),"\"" key "\""))>0) { n++; p+=found+length(key)+1 }
+  return n
+}
+function print_search_record(obj,    name,id,url) {
+  name=scalar_member(obj, source=="fontshare" ? "name" : "family")
+  id=source=="fontshare" ? scalar_member(obj,"slug") : name
+  if(name=="" || id=="") return
+  url=source=="fontshare" ? "https://www.fontshare.com/fonts/" id : "https://fonts.google.com/specimen/" name
+  gsub(/ /,"%20",url)
+  printf "%s\t%s\t%s\n",name,id,url
+}
+function print_font_details(obj,    name,slug,story,cat,lic,views,recent,pub,designers,design,styles,var,added,updated,axes,fonts,desc,home,dl,ver,stats,period,periods,period_data,analytics,count,i) {
+  if(source=="fontshare") {
+    name=scalar_member(obj,"name"); slug=scalar_member(obj,"slug")
+    story=scalar_member(obj,"story"); cat=scalar_member(obj,"category"); lic=scalar_member(obj,"license_type")
+    views=scalar_member(obj,"views"); recent=scalar_member(obj,"views_recent")
+    pub=scalar_member(object_member(obj,"publisher"),"name")
+    designers=first_array_object(object_member(obj,"designers")); design=scalar_member(designers,"name")
+    styles=count_field(object_member(obj,"styles"),"id")
+    var=scalar_member(obj,"is_variable")=="true" ? "yes" : "no"
+    added=scalar_member(obj,"inserted_at")
+    printf "%s\034%s\034%s\034%s\034%s\034%s\034%s\034%s\034%d\034%s\034%s\034%s\n",name,story,cat,lic,views,recent,pub,design,styles,var,added,slug
+  } else if(source=="google") {
+    name=scalar_member(obj,"family"); cat=scalar_member(obj,"category"); design=scalar_member(obj,"designer")
+    added=scalar_member(obj,"dateAdded"); updated=scalar_member(obj,"lastModified")
+    fonts=object_member(obj,"fonts"); styles=count_field(fonts,"filename")
+    axes=count_field(object_member(obj,"axes"),"tag"); desc=scalar_member(obj,"description")
+    printf "%s\034%s\034%s\034%s\034%s\034%d\034%d\034%s\n",name,cat,design,added,updated,styles,axes,desc
+  } else if(source=="homebrew") {
+    name=scalar_member(obj,"name"); desc=scalar_member(obj,"desc")
+    homepage=scalar_member(obj,"homepage"); download=scalar_member(obj,"url")
+    version=scalar_member(obj,"version"); analytics=object_member(object_member(obj,"analytics"),"install")
+    stats=""; periods[1]="30d"; periods[2]="90d"; periods[3]="365d"
+    for(i=1;i<=3;i++) {
+      period=periods[i]; period_data=object_member(analytics,period)
+      if(match(period_data, /:[[:space:]]*[0-9]+/)) {
+        count=substr(period_data,RSTART,RLENGTH); gsub(/[^0-9]/,"",count)
+        stats=stats period " " count " installs; "
+      }
+    }
+    sub(/; $/,"",stats)
+    gsub(/[\t\r\n]+/," ",desc)
+    printf "%s\034%s\034%s\034%s\034%s\034%s\n",name,desc,homepage,download,version,stats
+  }
+}
+BEGIN { RS = "\034" }
+{ json=$0 }
+END {
+  root=substr(json,skip_space(json,1))
+  if(source=="homebrew") { print_font_details(root); exit }
+  collection=source=="fontshare" ? "fonts" : "familyMetadataList"
+  array=object_member(root,collection); if(array=="") exit 1
+  p=2
+  while(p<=length(array)) {
+    p=skip_space(array,p); if(substr(array,p,1)=="]") break
+    if(substr(array,p,1)!="{") { p=value_end(array,p); p=skip_space(array,p); if(substr(array,p,1)==",") p++; continue }
+    e=value_end(array,p); obj=substr(array,p,e-p)
+    candidate=source=="fontshare" ? scalar_member(obj,"slug") : scalar_member(obj,"family")
+    name=source=="fontshare" ? scalar_member(obj,"name") : candidate
+    if(mode=="search" || tolower(candidate)==tolower(wanted) || tolower(name)==tolower(wanted)) {
+      if(mode=="search") print_search_record(obj); else { print_font_details(obj); found=1 }
+      if(mode=="show") exit
+    }
+    p=skip_space(array,e); if(substr(array,p,1)==",") p++
+  }
+  if(mode=="show" && !found) exit 1
+}
+JSON_AWK
+  awk -v source="${_source}" -v wanted="${_wanted}" -v mode="${_mode}" \
+    -f "${_parser}" "${_input_file}"
+}
+
 describe "search" <<HEREDOC
 Usage:
   ${_ME} search <string-or-regex>
@@ -1592,45 +1746,9 @@ search() {
   _records_file="$(_temp file .txt)"
   _matches_file="$(_temp file .txt)"
 
-  # _json_records()
-  # Fontshare font records expose their identifying fields (name and slug)
-  # before the nested styles/designers metadata. Split at object boundaries and
-  # extract only those two fields instead of recursively parsing every value.
-  # The full recursive parser made unnecessary passes through thousands of
-  # nested style and metadata properties.
+  # Normalize JSON catalogs to the common name/identifier/page format.
   _json_records() {
-    local _json_source="${1}"
-    local _json_file="${2}"
-
-    if [[ "${_json_source}" == "fontshare" ]]
-    then
-      sed 's/},/}\
-/g' "${_json_file}" | awk '
-        {
-          if (match($0, /"slug"[[:space:]]*:[[:space:]]*"[^"\\]*"/)) {
-            slug = substr($0, RSTART, RLENGTH)
-            sub(/^"slug"[[:space:]]*:[[:space:]]*"/, "", slug)
-            sub(/"$/, "", slug)
-          } else slug = ""
-
-          if (match($0, /"name"[[:space:]]*:[[:space:]]*"[^"\\]*"/)) {
-            name = substr($0, RSTART, RLENGTH)
-            sub(/^"name"[[:space:]]*:[[:space:]]*"/, "", name)
-            sub(/"$/, "", name)
-          } else name = ""
-
-          if (slug != "" && name != "") {
-            gsub(/\\\//, "/", name)
-            gsub(/\\n/, " ", name)
-            gsub(/\\t/, " ", name)
-            print name "\t" slug "\thttps://www.fontshare.com/fonts/" slug
-          }
-        }
-      '
-      return
-    fi
-
-    return 0
+    _json_catalog "${1}" "" search "${2}"
   }
 
   # _show_matches()
@@ -1742,37 +1860,7 @@ search() {
 
   # Google Fonts prefixes its JSON response with an anti-hijacking marker.
   if wait "${_google_pid}"; then
-    sed '1s/^[^{]*//' "${_google_file}" | awk '
-      function decode(value,    out, i, c, e) {
-        out = ""
-        for (i = 1; i <= length(value); i++) {
-          c = substr(value, i, 1)
-          if (c == "\\") {
-            e = substr(value, ++i, 1)
-            if      (e == "\"") out = out "\""
-            else if (e == "\\") out = out "\\"
-            else if (e == "/") out = out "/"
-            else if (e == "n" || e == "r" || e == "t") out = out " "
-            else out = out e
-          } else out = out c
-        }
-        return out
-      }
-      BEGIN { RS = "," }
-      {
-        if (match($0, /"family"[[:space:]]*:[[:space:]]*"[^"\\]*"/)) {
-          field = substr($0, RSTART, RLENGTH)
-          sub(/^"family"[[:space:]]*:[[:space:]]*"/, "", field)
-          sub(/"$/, "", field)
-          name = decode(field)
-          if (name != "") {
-            page = name
-            gsub(/ /, "%20", page)
-            print name "\t" name "\thttps://fonts.google.com/specimen/" page
-          }
-        }
-      }
-    ' > "${_records_file}"
+    _json_catalog google "" search "${_google_file}" > "${_records_file}"
   else
     _warn printf "google: unable to fetch catalog\n"
     : > "${_records_file}"
@@ -1933,94 +2021,7 @@ show() {
         -o "${_fontshare_file}" ||
         _exit_1 printf "Unable to retrieve Fontshare catalog.\n"
 
-      # Select one family object from the fonts array. The scanner tracks JSON
-      # strings and object depth, so nested publisher, designer, and style
-      # objects remain part of their parent family record.
-      _metadata_line="$(awk -v wanted="${_font}" '
-        function json_value(s, key,    needle,p,i,c,e,out) {
-          needle = "\"" key "\""
-          p = index(s, needle)
-          if (!p) return ""
-          p += length(needle)
-          while (substr(s,p,1) ~ /[[:space:]]/) p++
-          if (substr(s,p,1) != ":") return ""
-          p++
-          while (substr(s,p,1) ~ /[[:space:]]/) p++
-          if (substr(s,p,1) != "\"") {
-            if (substr(s,p,4) == "null") return ""
-            out = ""
-            while (p <= length(s)) { c = substr(s,p,1); if (c == "," || c == "}" || c == "]" || c ~ /[[:space:]]/) break; out = out c; p++ }
-            return out
-          }
-          p++
-          out = ""
-          for (i=p; i<=length(s); i++) {
-            c = substr(s,i,1)
-            if (c == "\\") {
-              e = substr(s,++i,1)
-              if      (e == "n" || e == "r" || e == "t") out = out " "
-              else if (e == "\"") out = out "\""
-              else if (e == "\\") out = out "\\"
-              else out = out e
-            } else if (c == "\"") return out
-            else out = out c
-          }
-          return out
-        }
-        {
-          json = json $0
-        }
-        END {
-          start = index(json, "\"fonts\"")
-          if (!start) exit 1
-          start = index(substr(json,start), "[") + start - 1
-          if (start <= 0) exit 1
-          depth = 0; quoted = 0; escaped = 0; object_start = 0
-          for (i=start+1; i<=length(json); i++) {
-            c = substr(json,i,1)
-            if (quoted) {
-              if (escaped) escaped = 0
-              else if (c == "\\") escaped = 1
-              else if (c == "\"") quoted = 0
-              continue
-            }
-            if (c == "\"") { quoted = 1; continue }
-            if (c == "{") {
-              if (depth == 0) object_start = i
-              depth++
-            } else if (c == "}") {
-              depth--
-              if (depth == 0 && object_start) {
-                obj = substr(json,object_start,i-object_start+1)
-                slug = json_value(obj,"slug")
-                name = json_value(obj,"name")
-                if (tolower(slug) == tolower(wanted) || tolower(name) == tolower(wanted)) {
-                  story = json_value(obj,"story")
-                  category = json_value(obj,"category")
-                  license = json_value(obj,"license_type")
-                  views = json_value(obj,"views")
-                  recent = json_value(obj,"views_recent")
-                  version = json_value(obj,"version")
-                  added = json_value(obj,"inserted_at")
-                  pubpart = substr(obj,index(obj,"\"publisher\"") )
-                  publisher = json_value(pubpart,"name")
-                  despart = substr(obj,index(obj,"\"designers\"") )
-                  designer = json_value(despart,"name")
-                  stylepart = substr(obj,index(obj,"\"styles\"") )
-                  styles = gsub(/\"id\"[[:space:]]*:/,"",stylepart)
-                  variable = (obj ~ /\"is_variable\"[[:space:]]*:[[:space:]]*true/ ? "yes" : "no")
-                  gsub(/[\t\r\n]+/," ",story)
-                  printf "%s\034%s\034%s\034%s\034%s\034%s\034%s\034%s\034%s\034%s\034%s\034%s\n", name,story,category,license,views,recent,publisher,designer,styles,variable,added,slug
-                  found = 1
-                  exit
-                }
-                object_start = 0
-              }
-            } else if (c == "]" && depth == 0) exit
-          }
-          if (!found) exit 1
-        }
-      ' "${_fontshare_file}")" ||
+      _metadata_line="$(_json_catalog fontshare "${_font}" show "${_fontshare_file}")" ||
         _exit_1 printf "Fontshare font not found: %s\n" "${_font}"
 
       IFS=$'\034' read -r _name _description _category _license _views _recent_views _publisher _designer _styles _variable _date_added _slug <<< "${_metadata_line}"
@@ -2038,46 +2039,7 @@ show() {
         "https://fonts.google.com/metadata/fonts" -o "${_google_file}" ||
         _exit_1 printf "Unable to retrieve Google Fonts catalog.\n"
 
-      _metadata_line="$(sed '1s/^[^{]*//' "${_google_file}" | awk -v wanted="${_font}" '
-        function json_value(s,key,    needle,p,i,c,e,out) {
-          needle = "\"" key "\""; p=index(s,needle); if (!p) return ""
-          p += length(needle); while (substr(s,p,1) ~ /[[:space:]]/) p++
-          if (substr(s,p,1) != ":") return ""; p++
-          while (substr(s,p,1) ~ /[[:space:]]/) p++
-          if (substr(s,p,1) != "\"") { if(substr(s,p,4)=="null") return ""; out=""; while(p<=length(s)&&substr(s,p,1)!~ /[,}]]/&&substr(s,p,1)!~ /[[:space:]]/) out=out substr(s,p++,1); return out }; p++; out=""
-          for (i=p;i<=length(s);i++) { c=substr(s,i,1); if (c=="\\") { e=substr(s,++i,1); if(e=="n"||e=="r"||e=="t") out=out " "; else if(e=="\"") out=out "\""; else if(e=="\\") out=out "\\"; else out=out e } else if(c=="\"") return out; else out=out c }
-          return out
-        }
-        { json=json $0 }
-        END {
-          start=index(json,"\"familyMetadataList\""); if(!start) exit 1
-          start=index(substr(json,start),"[")+start-1; if(start<=0) exit 1
-          depth=0; quoted=0; escaped=0; object_start=0
-          for(i=start+1;i<=length(json);i++) {
-            c=substr(json,i,1)
-            if(quoted) { if(escaped) escaped=0; else if(c=="\\") escaped=1; else if(c=="\"") quoted=0; continue }
-            if(c=="\"") { quoted=1; continue }
-            if(c=="{") { if(depth==0) object_start=i; depth++ }
-            else if(c=="}") { depth--; if(depth==0&&object_start) {
-              obj=substr(json,object_start,i-object_start+1); name=json_value(obj,"family")
-              if(tolower(name)==tolower(wanted)) {
-                category=json_value(obj,"category"); designer=json_value(obj,"designer")
-                description=json_value(obj,"description")
-                added=json_value(obj,"dateAdded"); updated=json_value(obj,"lastModified")
-                fontpart=substr(obj,index(obj,"\"fonts\"")); styles=gsub(/\"filename\"[[:space:]]*:/,"",fontpart)
-                if(styles==0) styles=gsub(/\"thickness\"[[:space:]]*:/,"",fontpart)
-                axes=0
-                axes_position=index(obj,"\"axes\"")
-                if(axes_position) { axespart=substr(obj,axes_position); axes=gsub(/\"tag\"[[:space:]]*:/,"",axespart) }
-                printf "%s\034%s\034%s\034%s\034%s\034%s\034%s\034%s\n",name,category,designer,added,updated,styles,axes,description
-                found=1; exit
-              }
-              object_start=0
-            }} else if(c=="]"&&depth==0) exit
-          }
-          if(!found) exit 1
-        }
-      ')" ||
+      _metadata_line="$(_json_catalog google "${_font}" show "${_google_file}")" ||
         _exit_1 printf "Google Fonts family not found: %s\n" "${_font}"
 
       IFS=$'\034' read -r _name _category _designer _date_added _updated _styles _axes _description <<< "${_metadata_line}"
@@ -2091,40 +2053,8 @@ show() {
         "https://formulae.brew.sh/api/cask/${_font}.json" -o "${_brew_file}" ||
         _exit_1 printf "Homebrew cask not found: %s\n" "${_font}"
 
-      _metadata_line="$(awk -v token="${_font}" '
-        function value(s,key,    n,p,i,c,e,out) {
-          n="\"" key "\""; p=index(s,n); if(!p)return ""; p+=length(n)
-          while(substr(s,p,1)~/[[:space:]]/)p++; if(substr(s,p,1)!=":")return ""; p++
-          while(substr(s,p,1)~/[[:space:]]/)p++
-          if(substr(s,p,1)=="[") { p++; while(substr(s,p,1)~/[[:space:]]/)p++ }
-          if(substr(s,p,1)!="\"")return ""; p++; out=""
-          for(i=p;i<=length(s);i++){c=substr(s,i,1);if(c=="\\"){e=substr(s,++i,1);if(e=="n"||e=="r"||e=="t")out=out " ";else if(e=="\"")out=out "\"";else if(e=="\\")out=out "\\";else out=out e}else if(c=="\"")return out;else out=out c} return out
-        }
-        { json=json $0 }
-        END {
-          name=value(json,"name"); desc=value(json,"desc"); homepage=value(json,"homepage")
-          download=value(json,"url"); version=value(json,"version")
-          analytics=index(json,"\"analytics\""); stats=""
-          if(analytics) {
-            a=substr(json,analytics)
-            periods[1]="30d"; periods[2]="90d"; periods[3]="365d"
-            for(i=1;i<=3;i++) {
-              period=periods[i]
-              pattern="\"" period "\"[[:space:]]*:[[:space:]]*[{][^}]*[}]"
-              if(match(a,pattern)) {
-                v=substr(a,RSTART,RLENGTH)
-                if(match(v,/:[[:space:]]*[0-9]+/)) {
-                  count=substr(v,RSTART,RLENGTH); gsub(/[^0-9]/,"",count)
-                  stats=stats period " " count " installs; "
-                }
-              }
-            }
-            sub(/; $/,"",stats)
-          }
-          gsub(/[\t\r\n]+/," ",desc)
-          printf "%s\034%s\034%s\034%s\034%s\034%s\n",name,desc,homepage,download,version,stats
-        }
-      ' "${_brew_file}")"
+      _metadata_line="$(_json_catalog homebrew "${_font}" show "${_brew_file}")" ||
+        _exit_1 printf "Unable to read Homebrew cask metadata: %s\n" "${_font}"
       IFS=$'\034' read -r _name _description _homepage _download_url _version _views <<< "${_metadata_line}"
       _page_url="https://formulae.brew.sh/cask/${_font}"
       ;;
