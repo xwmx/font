@@ -270,7 +270,7 @@ An option without a value, a `--url` value that isn't a URL, or a `--url` combin
 ! A URL can't be combined with a source or font.
 ```
 
-`font list` also accepts [`--source`](#listing-fonts), which filters the list.
+`font list` has its own [`--source` and `--no-source`](#listing-fonts) options, which filter the list.
 
 ### Listing Fonts
 
@@ -328,6 +328,30 @@ Installed with font:
 ```
 
 `--source` can be combined with a search string, so `font list --source homebrew hack` shows only the Homebrew fonts that match `hack`. The system font files are not listed when `--source` is used, since they aren't associated with a source. The source must be one of `fontshare`, `google`, `homebrew`, or `url`.
+
+Used without a source, `--source` lists every font that has a recorded source, from all sources:
+
+```
+> font list --source
+Installed with font:
+  fontshare satoshi
+  google Open Sans
+  homebrew font-fira-code
+```
+
+The argument after `--source` is read as its source, so a search string has to come before a `--source` that doesn't have one, as in `font list hack --source`.
+
+To list the fonts that don't have a recorded source, use `--no-source`:
+
+```
+> font list --no-source
+Without a recorded source:
+  Arial.ttf
+  Helvetica.ttc
+  ...
+```
+
+These are the font files in the system's font directories that weren't installed with `font`. Files that `font` installed are left out, as are the links Homebrew font casks create, since Homebrew is their source. `--no-source` can be combined with a search string, as in `font list mono --no-source`. `--source` and `--no-source` can't be used together.
 
 The system section searches the following directories, skipping any that don't exist. `$FONT_DIR` is always included.
 
@@ -498,10 +522,12 @@ Exit status:
 
 ```
 Usage:
-  font list [--source <source>] [<search string>]
+  font list [--source [<source>] | --no-source] [<search string>]
 
 Options:
-  --source <source>  Only list fonts installed from <source>.
+  --source [<source>]  Only list fonts with a recorded source. When <source>
+                       is given, only fonts installed from <source>.
+  --no-source          Only list fonts without a recorded source.
 
 Description:
   List the fonts installed with font, followed by all font files found in
@@ -509,8 +535,14 @@ Description:
   regular expression, only matching entries are listed. Matching is
   case-insensitive.
 
-  When --source is used, only fonts installed from the specified source are
-  listed, and the system font files are omitted.
+  When --source is used, only fonts with a recorded source are listed, or
+  only fonts installed from <source> when one is given, and the system font
+  files are omitted. The argument after --source is read as its <source>, so
+  a search string must come before a --source without one.
+
+  When --no-source is used, only font files without a recorded source are
+  listed. These are the font files found in the system's font directories
+  that were not installed with font or as Homebrew font casks.
 
 Sources:
   fontshare, google, homebrew, url
@@ -518,12 +550,16 @@ Sources:
 Examples:
   font list
   font list satoshi
+  font list --source
   font list --source google
   font list --source homebrew mono
+  font list --no-source
+  font list mono --no-source
 
 Exit status:
   0   Success, including when no entries match.
-  1   Invalid search pattern, unsupported source, or missing source name.
+  1   Invalid search pattern, unsupported source, or --source combined
+      with --no-source.
 ```
 
 ### `font status`

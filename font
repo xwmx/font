@@ -1518,10 +1518,12 @@ install() {
 
 describe "list" <<HEREDOC
 Usage:
-  ${_ME} list [--source <source>] [<search string>]
+  ${_ME} list [--source [<source>] | --no-source] [<search string>]
 
 Options:
-  --source <source>  Only list fonts installed from <source>.
+  --source [<source>]  Only list fonts with a recorded source. When <source>
+                       is given, only fonts installed from <source>.
+  --no-source          Only list fonts without a recorded source.
 
 Description:
   List the fonts installed with ${_ME}, followed by all font files found in
@@ -1529,8 +1531,14 @@ Description:
   regular expression, only matching entries are listed. Matching is
   case-insensitive.
 
-  When --source is used, only fonts installed from the specified source are
-  listed, and the system font files are omitted.
+  When --source is used, only fonts with a recorded source are listed, or
+  only fonts installed from <source> when one is given, and the system font
+  files are omitted. The argument after --source is read as its <source>, so
+  a search string must come before a --source without one.
+
+  When --no-source is used, only font files without a recorded source are
+  listed. These are the font files found in the system's font directories
+  that were not installed with ${_ME} or as Homebrew font casks.
 
 Sources:
   fontshare, google, homebrew, url
@@ -1538,8 +1546,11 @@ Sources:
 Examples:
   ${_ME} list
   ${_ME} list satoshi
+  ${_ME} list --source
   ${_ME} list --source google
   ${_ME} list --source homebrew mono
+  ${_ME} list --no-source
+  ${_ME} list mono --no-source
 HEREDOC
 list() {
   # _list_matches()
@@ -1558,21 +1569,27 @@ list() {
   local _source_filter=
   local _found=0
   local _manifest_file=
+  local _no_source=0
   local _system_dirs=()
   local _system_output=
+  local _with_source=0
 
   while ((${#}))
   do
     case "${1:-}" in
       --source)
-        _source_filter="${2:-}"
+        _with_source=1
 
-        if [[ -z "${_source_filter}" ]]
+        # The next argument is the <source>, unless it's missing or an option.
+        if [[ -n "${2:-}" ]] && [[ "${2}" != -* ]]
         then
-          _exit_1 printf "Usage: %s list [--source <source>] [<search string>]\\n" "${_ME}"
-        fi
+          _source_filter="${2}"
 
-        shift
+          shift
+        fi
+        ;;
+      --no-source)
+        _no_source=1
         ;;
       *)
         if [[ -z "${_query}" ]]
@@ -1594,6 +1611,11 @@ list() {
       ;;
   esac
 
+  if ((_with_source)) && ((_no_source))
+  then
+    _exit_1 printf "Can't combine --source and --no-source.\\n"
+  fi
+
   # `grep` exits with `2` when the pattern is invalid and `1` for no match.
   local _grep_status=0
   printf "" | grep -E -i -e "${_query:-.}" >/dev/null 2>&1 || _grep_status=$?
@@ -1601,6 +1623,102 @@ list() {
   if ((_grep_status == 2))
   then
     _exit_1 printf "Invalid search pattern: %s\\n" "${_query}"
+  fi
+
+  local _candidate_dirs=("${_FONT_DIR}")
+
+  case "${_OS}" in
+    Darwin)
+      _candidate_dirs+=(
+        "${HOME}/Library/Fonts"
+        "/Library/Fonts"
+        "/System/Library/Fonts"
+      )
+      ;;
+    *)
+      _candidate_dirs+=(
+        "${XDG_DATA_HOME:-${HOME}/.local/share}/fonts"
+        "${HOME}/.fonts"
+        "/usr/local/share/fonts"
+        "/usr/share/fonts"
+      )
+      ;;
+  esac
+
+  local __dir=
+  for   __dir in "${_candidate_dirs[@]}"
+  do
+    [[ -d "${__dir}" ]] && _system_dirs+=("${__dir}")
+  done
+
+  if ((_no_source))
+  then
+    local _found_paths=
+    local _names=
+    local _path=
+    local _recorded=
+    local _target=
+
+    _recorded="$(cat "${_MANIFEST_DIR}"/*/* 2>/dev/null || :)"
+
+    if ((${#_system_dirs[@]}))
+    then
+      _found_paths="$(
+        find "${_system_dirs[@]}" \( -type f -o -type l \) \(  \
+          -iname "*.otf" -o -iname "*.ttf"                    \
+          -o -iname "*.ttc" -o -iname "*.otc"                 \
+          -o -iname "*.dfont"                                 \
+        \) -print 2>/dev/null || :
+      )"
+    fi
+
+    # Skip the font files recorded in install manifests.
+    if [[ -n "${_found_paths}" ]] && [[ -n "${_recorded}" ]]
+    then
+      _found_paths="$(
+        printf "%s\\n" "${_found_paths}" |
+          { grep -v -x -F -f <(printf "%s\\n" "${_recorded}") || :; }
+      )"
+    fi
+
+    while IFS= read -r _path
+    do
+      [[ -n "${_path}" ]] || continue
+
+      # Homebrew casks link their fonts into the font directory.
+      if [[ -L "${_path}" ]]
+      then
+        _target="$(readlink "${_path}" 2>/dev/null || :)"
+
+        if [[ "${_target}" == */Caskroom/* ]]
+        then
+          continue
+        fi
+      fi
+
+      _names+="${_path##*/}"$'\n'
+    done <<< "${_found_paths}"
+
+    _system_output="$(
+      printf "%s" "${_names}"                     \
+        | sort -u                                 \
+        | { grep -E -i -e "${_query:-.}" || :; }  \
+        | sed -e 's/^/  /'
+    )"
+
+    printf "Without a recorded source:\\n"
+
+    if [[ -n "${_system_output}" ]]
+    then
+      printf "%s\\n" "${_system_output}"
+    elif [[ -n "${_query}" ]]
+    then
+      printf "  (no matches)\\n"
+    else
+      printf "  (none)\\n"
+    fi
+
+    return 0
   fi
 
   printf "Installed with %s:\\n" "${_ME}"
@@ -1666,36 +1784,10 @@ list() {
   fi
 
   # System font files aren't associated with a source.
-  if [[ -n "${_source_filter}" ]]
+  if ((_with_source))
   then
     return 0
   fi
-
-  local _candidate_dirs=("${_FONT_DIR}")
-
-  case "${_OS}" in
-    Darwin)
-      _candidate_dirs+=(
-        "${HOME}/Library/Fonts"
-        "/Library/Fonts"
-        "/System/Library/Fonts"
-      )
-      ;;
-    *)
-      _candidate_dirs+=(
-        "${XDG_DATA_HOME:-${HOME}/.local/share}/fonts"
-        "${HOME}/.fonts"
-        "/usr/local/share/fonts"
-        "/usr/share/fonts"
-      )
-      ;;
-  esac
-
-  local __dir=
-  for   __dir in "${_candidate_dirs[@]}"
-  do
-    [[ -d "${__dir}" ]] && _system_dirs+=("${__dir}")
-  done
 
   printf "\\nInstalled on the system:\\n"
 
