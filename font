@@ -1991,9 +1991,9 @@ search() {
 
 describe "show" <<HEREDOC
 Usage:
+  ${_ME} show <font-or-url>
   ${_ME} show <source> <font>
-  ${_ME} show <url>
-  ${_ME} show [--source <source>] [--font <font>] [--url <url>]
+  ${_ME} show [--source <source>] <font>
 
 Options:
   --font <font>      The font to display information about, by name.
@@ -2012,6 +2012,8 @@ Sources:
   url         A direct link to a font archive or file.
 
 Examples:
+  ${_ME} show satoshi
+  ${_ME} show "Times New Roman Bold Italic.ttf"
   ${_ME} show fontshare satoshi
   ${_ME} show fontshare "General Sans"
   ${_ME} show google "Open Sans"
@@ -2020,105 +2022,171 @@ Examples:
   ${_ME} show https://fonts.google.com/specimen/Montserrat
   ${_ME} show https://example.com/fonts/Example.zip
 HEREDOC
-show() {
-  local _font=
-  local _source=
-  local _url=
-  local _resolved=
+_find_installed_font() {
+  local wanted="${1##*/}"
+  local dir path base
+  local dirs=("${_FONT_DIR}" "${HOME}/Library/Fonts" /Library/Fonts
+              /System/Library/Fonts /System/Library/Fonts/Supplemental
+              "${HOME}/.fonts" /usr/local/share/fonts /usr/share/fonts)
+  local wanted_lower="${wanted,,}"
 
-  while ((${#}))
+  [[ -f "${1}" ]] && { printf '%s\n' "$1"; return 0; }
+
+  for dir in "${dirs[@]}"
   do
-    case "${1:-}" in
-      --font|--source|--url)
-        if [[ -z "${2:-}" ]]
-        then
-          _exit_1 printf "%s requires a value.\n" "${1}"
-        fi
+    [[ -d "${dir}" ]] || continue
+    while IFS= read -r path
+    do
+      base="${path##*/}"
+      if [[ "${base,,}" == "${wanted_lower}" ]]
+      then
+        printf '%s\n' "${path}"
+        return 0
+      fi
+    done < <(find "${dir}" -type f -print 2>/dev/null)
+  done
+  return 1
+}
 
-        case "${1}" in
-          --font)   _font="${2}"    ;;
-          --source) _source="${2}"  ;;
-          --url)    _url="${2}"     ;;
+show() {
+  local _font= _source= _url= _resolved= _positional_source=0
+  local _source_was_given=0 _local_path= _metadata_line=
+  local _page_url= _download_url= _description= _category= _designer=
+  local _publisher= _license= _version= _date_added= _updated=
+  local _views= _recent_views= _styles= _variable= _axes= _homepage=
+  local _name= _manifest_file= _installed_path=
+  local _total=0 _present=0 _missing=0
+  local _fontshare_file= _google_file= _brew_file= _records_file=
+  local _fontshare_pid= _google_pid= _brew_pid= _candidate=
+
+  while (($#))
+  do
+    case "$1" in
+      --font|--source|--url)
+        [[ -n "${2:-}" ]] || _exit_1 printf '%s requires a value.\n' "$1"
+        case "$1" in
+          --font) _font="$2" ;;
+          --source) _source="$2"; _source_was_given=1 ;;
+          --url) _url="$2" ;;
         esac
-        shift
+        shift 2
         ;;
       *)
-        if [[ -z "${_source}" ]]
-        then
-          _source="${1}"
-        elif [[ -z "${_font}" ]]
-        then
-          _font="${1}"
+        if [[ -z "${_source}" && -z "${_font}" ]]; then
+          _font="$1"
+        elif [[ -z "${_source}" && -n "${_font}" ]]; then
+          _source="${_font}"
+          _font="$1"
+          _source_was_given=1
+        elif [[ -n "${_source}" && -z "${_font}" ]]; then
+          _font="$1"
         else
-          _exit_1 printf "Unexpected argument: %s\n" "${1}"
+          _exit_1 printf 'Unexpected argument: %s\n' "$1"
         fi
+        shift
         ;;
     esac
-    shift
   done
 
-  if [[ -n "${_url}" ]]
-  then
-    if ! _is_url "${_url}"
-    then
-      _exit_1 printf "Invalid URL: %s\n" "${_url}"
-    fi
-    if [[ -n "${_source}" ]] || [[ -n "${_font}" ]]
-    then
-      _exit_1 printf "A URL can't be combined with a source or font.\n"
-    fi
+  if [[ -n "${_url}" ]]; then
+    [[ -z "${_source}" && -z "${_font}" ]] ||
+      _exit_1 printf 'A URL cannot be combined with a source or font.\n'
     _source="${_url}"
+  elif [[ -z "${_source}" ]] && _is_url "${_font}"; then
+    _source="${_font}"
+    _font=
   fi
 
+  # A single positional URL or --url is resolved to a known source when
+  # possible; otherwise it remains a direct URL.
   if [[ -z "${_font}" ]] && _is_url "${_source}"
   then
     _url="${_source}"
-    _resolved="$(_resolve_font_url "${_url}")"
-    _source="${_resolved%% *}"
-    _font="${_resolved#* }"
+    if _resolved="$(_resolve_font_url "${_url}" 2>/dev/null)"; then
+      _source="${_resolved%% *}"
+      _font="${_resolved#* }"
+    else
+      _source=url
+      _font="${_url##*/}"
+    fi
   fi
 
-  if [[ "${_source}" == "url" ]] && _is_url "${_font}"
-  then
-    _url="${_font}"
-    _resolved="$(_resolve_font_url "${_url}")"
-    _source="${_resolved%% *}"
-    _font="${_resolved#* }"
+  [[ -n "${_font}" ]] ||
+    _exit_1 printf 'Usage: %s show [<source>] <font-or-url>\n' "${_ME}"
+
+  # A source-less lookup first checks installed files. This makes local fonts
+  # fast to identify and avoids network requests for the common local case.
+  if [[ -z "${_source}" ]]; then
+    if _local_path="$(_find_installed_font "${_font}")"; then
+      _source=local
+    else
+      # Resolve a catalog name against Fontshare and Google Fonts in parallel.
+      # Homebrew is checked last because its cask API requires a cask token.
+      _fontshare_file="$(_temp file .json)"
+      _google_file="$(_temp file .json)"
+      curl -fsSL --compressed --connect-timeout 3 --max-time 8 \
+        'https://api.fontshare.com/v2/fonts?limit=1000&offset=0' -o "${_fontshare_file}" &
+      _fontshare_pid=$!
+      curl -fsSL --compressed --connect-timeout 3 --max-time 8 \
+        'https://fonts.google.com/metadata/fonts' -o "${_google_file}" &
+      _google_pid=$!
+
+      if wait "${_fontshare_pid}"; then
+        if _metadata_line="$(_json_catalog fontshare "${_font}" show "${_fontshare_file}")"; then
+          _source=fontshare
+        fi
+      fi
+      if [[ -z "${_source}" ]] && wait "${_google_pid}"; then
+        if _metadata_line="$(_json_catalog google "${_font}" show "${_google_file}")"; then
+          _source=google
+        fi
+      else
+        wait "${_google_pid}" 2>/dev/null || :
+      fi
+
+      # Homebrew casks are named by token (for example font-fira-code).
+      if [[ -z "${_source}" ]]; then
+        _brew_file="$(_temp file .html)"
+        _records_file="$(_temp file .txt)"
+        if curl -fsSL --connect-timeout 3 --max-time 8 \
+          'https://formulae.brew.sh/cask-font/' -o "${_brew_file}"; then
+          awk '
+            function clean(s) { gsub(/<[^>]*>/,"",s); gsub(/&amp;/,"\\&",s); return s }
+            { row=row $0; if (index(row,"</tr>")==0) next
+              token=row; sub(/^.*href="\/cask\//,"",token); sub(/".*$/, "", token)
+              if (token ~ /^font-/) {
+                name=row; last=""
+                while (match(name, /<td[^>]*>/)) {
+                  name=substr(name,RSTART+RLENGTH); stop=index(name,"</td>"); if (!stop) break
+                  last=clean(substr(name,1,stop-1)); name=substr(name,stop+5)
+                }
+                if (last!="") print last "\t" token
+              }
+              row=""
+            }
+          ' "${_brew_file}" > "${_records_file}"
+          _candidate="$(awk -F '\t' -v wanted="${_font}" 'tolower($1)==tolower(wanted) || tolower($2)==tolower(wanted) {print $2; exit}' "${_records_file}")"
+          if [[ -n "${_candidate}" ]]; then
+            _source=homebrew
+            _font="${_candidate}"
+          fi
+        fi
+      fi
+    fi
   fi
 
-  if [[ -z "${_source}" ]] || [[ -z "${_font}" ]]
-  then
-    _exit_1 printf "Usage: %s show ( <source> <font> | <url> | --source <source> --font <font> | --url <url> )\n" "${_ME}"
-  fi
-
-  local _page_url=
-  local _download_url=
-  local _description=
-  local _category=
-  local _designer=
-  local _publisher=
-  local _license=
-  local _version=
-  local _date_added=
-  local _updated=
-  local _views=
-  local _recent_views=
-  local _styles=
-  local _variable=
-  local _axes=
-  local _homepage=
-  local _name="${_font}"
-  local _metadata_line=
-  local _manifest_file=
-  local _installed_path=
-  local _total=0
-  local _present=0
-  local _missing=0
-
+  local _source_label="${_source}"
   case "${_source}" in
+    local)
+      _name="${_font##*/}"
+      _page_url="${_local_path}"
+      _download_url="${_local_path}"
+      printf 'Name: %s\nSource: installed font\nFile: %s\nInstalled: yes\n' \
+        "${_name}" "${_local_path}"
+      return 0
+      ;;
     fontshare|google|homebrew)
-      _command_exists curl ||
-        _exit_1 printf "Required command not found: curl\n"
+      _command_exists curl || _exit_1 printf 'Required command not found: curl\n'
       ;;
     url)
       _url="${_url:-${_font}}"
@@ -2126,103 +2194,92 @@ show() {
       _download_url="${_url}"
       ;;
     *)
-      _exit_1 printf "Unsupported font source: %s\n" "${_source}"
+      _exit_1 printf 'Font not found locally or in supported catalogs: %s\n' "${_font}"
       ;;
   esac
 
   case "${_source}" in
     fontshare)
-      local _fontshare_file="$(_temp file .json)"
-      curl -fsSL --compressed --connect-timeout 3 --max-time 12 \
-        "https://api.fontshare.com/v2/fonts?limit=1000&offset=0" \
-        -o "${_fontshare_file}" ||
-        _exit_1 printf "Unable to retrieve Fontshare catalog.\n"
-
-      _metadata_line="$(_json_catalog fontshare "${_font}" show "${_fontshare_file}")" ||
-        _exit_1 printf "Fontshare font not found: %s\n" "${_font}"
-
-      IFS=$'\034' read -r _name _description _category _license _views _recent_views _publisher _designer _styles _variable _date_added _slug <<< "${_metadata_line}"
-      _font="${_slug}"
-      case "${_license}" in
-        itf_ffl)  _license="ITF Free Font License" ;;
-        sil_ofl)  _license="SIL Open Font License" ;;
-      esac
-      _page_url="https://www.fontshare.com/fonts/${_slug}"
-      _download_url="https://api.fontshare.com/v2/fonts/download/${_slug}"
+      if [[ -z "${_metadata_line}" ]]; then
+        _fontshare_file="$(_temp file .json)"
+        curl -fsSL --compressed --connect-timeout 3 --max-time 8 \
+          'https://api.fontshare.com/v2/fonts?limit=1000&offset=0' -o "${_fontshare_file}" ||
+          _exit_1 printf 'Unable to retrieve Fontshare catalog.\n'
+        _metadata_line="$(_json_catalog fontshare "${_font}" show "${_fontshare_file}")" ||
+          _exit_1 printf 'Fontshare font not found: %s\n' "${_font}"
+      fi
+      IFS=$'\034' read -r _name _description _category _license _views _recent_views _publisher _designer _styles _variable _date_added _candidate <<< "${_metadata_line}"
+      _font="${_candidate}"
+      case "${_license}" in itf_ffl) _license='ITF Free Font License' ;; sil_ofl) _license='SIL Open Font License' ;; esac
+      _page_url="https://www.fontshare.com/fonts/${_font}"
+      _download_url="https://api.fontshare.com/v2/fonts/download/${_font}"
       ;;
     google)
-      local _google_file="$(_temp file .json)"
-      curl -fsSL --compressed --connect-timeout 3 --max-time 12 \
-        "https://fonts.google.com/metadata/fonts" -o "${_google_file}" ||
-        _exit_1 printf "Unable to retrieve Google Fonts catalog.\n"
-
-      _metadata_line="$(_json_catalog google "${_font}" show "${_google_file}")" ||
-        _exit_1 printf "Google Fonts family not found: %s\n" "${_font}"
-
+      if [[ -z "${_metadata_line}" ]]; then
+        _google_file="$(_temp file .json)"
+        curl -fsSL --compressed --connect-timeout 3 --max-time 8 \
+          'https://fonts.google.com/metadata/fonts' -o "${_google_file}" ||
+          _exit_1 printf 'Unable to retrieve Google Fonts catalog.\n'
+        _metadata_line="$(_json_catalog google "${_font}" show "${_google_file}")" ||
+          _exit_1 printf 'Google Fonts family not found: %s\n' "${_font}"
+      fi
       IFS=$'\034' read -r _name _category _designer _date_added _updated _styles _axes _description <<< "${_metadata_line}"
-      if [[ "${_axes:-0}" -gt 0 ]]; then _variable="${_axes} axis/axes"; fi
+      [[ "${_axes:-0}" -gt 0 ]] && _variable="${_axes} axis/axes"
       _page_url="https://fonts.google.com/specimen/${_name// /%20}"
       _download_url="https://fonts.google.com/download?family=${_name// /%20}"
       ;;
     homebrew)
-      local _brew_file="$(_temp file .json)"
-      curl -fsSL --compressed --connect-timeout 3 --max-time 12 \
+      _brew_file="$(_temp file .json)"
+      curl -fsSL --compressed --connect-timeout 3 --max-time 8 \
         "https://formulae.brew.sh/api/cask/${_font}.json" -o "${_brew_file}" ||
-        _exit_1 printf "Homebrew cask not found: %s\n" "${_font}"
-
+        _exit_1 printf 'Homebrew cask not found: %s\n' "${_font}"
       _metadata_line="$(_json_catalog homebrew "${_font}" show "${_brew_file}")" ||
-        _exit_1 printf "Unable to read Homebrew cask metadata: %s\n" "${_font}"
+        _exit_1 printf 'Unable to read Homebrew cask metadata: %s\n' "${_font}"
       IFS=$'\034' read -r _name _description _homepage _download_url _version _views <<< "${_metadata_line}"
       _page_url="https://formulae.brew.sh/cask/${_font}"
       ;;
   esac
 
-  printf "Name: %s\n" "${_name:-${_font}}"
-  printf "Source: %s\n" "${_source}"
-  [[ -n "${_description}" ]] && printf "Description: %s\n" "${_description}"
-  [[ -n "${_category}" ]] && printf "Category: %s\n" "${_category}"
-  [[ -n "${_designer}" ]] && printf "Designer: %s\n" "${_designer}"
-  [[ -n "${_publisher}" ]] && printf "Publisher: %s\n" "${_publisher}"
-  [[ -n "${_license}" ]] && printf "License: %s\n" "${_license}"
-  [[ -n "${_version}" ]] && printf "Version: %s\n" "${_version}"
-  [[ -n "${_date_added}" ]] && printf "Added: %s\n" "${_date_added}"
-  [[ -n "${_updated}" ]] && printf "Last updated: %s\n" "${_updated}"
-  [[ -n "${_styles}" ]] && printf "Styles: %s\n" "${_styles}"
-  [[ -n "${_variable}" ]] && printf "Variable font: %s\n" "${_variable}"
-  [[ -n "${_views}" ]] && printf "Views: %s\n" "${_views}"
-  [[ -n "${_recent_views}" ]] && printf "Recent views: %s\n" "${_recent_views}"
-  [[ -n "${_homepage}" ]] && printf "Homepage: %s\n" "${_homepage}"
-  printf "Font page: %s\n" "${_page_url}"
-  printf "Download: %s\n" "${_download_url}"
+  printf 'Name: %s\nSource: %s\n' "${_name:-${_font}}" "${_source_label}"
+  [[ -n "${_description}" ]] && printf 'Description: %s\n' "${_description}"
+  [[ -n "${_category}" ]] && printf 'Category: %s\n' "${_category}"
+  [[ -n "${_designer}" ]] && printf 'Designer: %s\n' "${_designer}"
+  [[ -n "${_publisher}" ]] && printf 'Publisher: %s\n' "${_publisher}"
+  [[ -n "${_license}" ]] && printf 'License: %s\n' "${_license}"
+  [[ -n "${_version}" ]] && printf 'Version: %s\n' "${_version}"
+  [[ -n "${_date_added}" ]] && printf 'Added: %s\n' "${_date_added}"
+  [[ -n "${_updated}" ]] && printf 'Last updated: %s\n' "${_updated}"
+  [[ -n "${_styles}" ]] && printf 'Styles: %s\n' "${_styles}"
+  [[ -n "${_variable}" ]] && printf 'Variable font: %s\n' "${_variable}"
+  [[ -n "${_views}" ]] && printf 'Views: %s\n' "${_views}"
+  [[ -n "${_recent_views}" ]] && printf 'Recent views: %s\n' "${_recent_views}"
+  [[ -n "${_homepage}" ]] && printf 'Homepage: %s\n' "${_homepage}"
+  printf 'Font page: %s\nDownload: %s\n' "${_page_url}" "${_download_url}"
 
-  _manifest_file="$(_font_manifest_path "${_source}" "${_font}")"
-  if [[ "${_source}" == "homebrew" ]]
-  then
-    if _command_exists brew && brew list --cask "${_font}" >/dev/null 2>&1
-    then
-      printf "Installed: yes (Homebrew)\n"
+  if [[ "${_source}" == homebrew ]]; then
+    if _command_exists brew && brew list --cask "${_font}" >/dev/null 2>&1; then
+      printf 'Installed: yes (Homebrew)\n'
     else
-      printf "Installed: no\n"
-    fi
-  elif [[ -f "${_manifest_file}" ]]
-  then
-    while IFS= read -r _installed_path
-    do
-      [[ -n "${_installed_path}" ]] || continue
-      _total=$((_total + 1))
-      if [[ -e "${_installed_path}" ]]
-      then _present=$((_present + 1))
-      else _missing=$((_missing + 1))
-      fi
-    done < "${_manifest_file}"
-    if ((_total > 0 && _missing == 0))
-    then printf "Installed: yes (%d/%d files present)\n" "${_present}" "${_total}"
-    elif ((_present > 0))
-    then printf "Installed: incomplete (%d/%d files present)\n" "${_present}" "${_total}"
-    else printf "Installed: no\n"
+      printf 'Installed: no\n'
     fi
   else
-    printf "Installed: no\n"
+    _manifest_file="$(_font_manifest_path "${_source}" "${_font}")"
+    if [[ -f "${_manifest_file}" ]]; then
+      while IFS= read -r _installed_path; do
+        [[ -n "${_installed_path}" ]] || continue
+        _total=$((_total + 1))
+        if [[ -e "${_installed_path}" ]]; then _present=$((_present + 1)); else _missing=$((_missing + 1)); fi
+      done < "${_manifest_file}"
+      if ((_total > 0 && _missing == 0)); then
+        printf 'Installed: yes (%d/%d files present)\n' "${_present}" "${_total}"
+      elif ((_present > 0)); then
+        printf 'Installed: incomplete (%d/%d files present)\n' "${_present}" "${_total}"
+      else
+        printf 'Installed: no\n'
+      fi
+    else
+      printf 'Installed: no\n'
+    fi
   fi
 }
 
