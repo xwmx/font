@@ -600,6 +600,28 @@ _url_decode() {
   printf "%b" "$(printf "%s" "${1}" | sed -e 's/%\([0-9A-Fa-f][0-9A-Fa-f]\)/\\x\1/g')"
 }
 
+# _url_encode()
+#
+# Usage:
+#   _url_encode <string>
+#
+# Description:
+#   Percent-encode a string for use as a URL query value.
+_url_encode() {
+  printf "%s" "${1}" | od -An -v -tu1 | awk '{
+    for (i = 1; i <= NF; i++) {
+      byte = $i + 0
+      if ((byte >= 48 && byte <= 57) ||
+          (byte >= 65 && byte <= 90) ||
+          (byte >= 97 && byte <= 122) ||
+          byte == 45 || byte == 46 || byte == 95 || byte == 126)
+        printf "%c", byte
+      else
+        printf "%%%02X", byte
+    }
+  }'
+}
+
 # _resolve_font_url()
 #
 # Usage:
@@ -1758,6 +1780,403 @@ search() {
   _show_matches "Google"
 
   printf "\n%s match(es)\n" "${_total}"
+}
+
+# ------------------------------------------------------------------------ show
+
+describe "show" <<HEREDOC
+Usage:
+  ${_ME} show <source> <font>
+  ${_ME} show <url>
+  ${_ME} show [--source <source>] [--font <font>] [--url <url>]
+
+Options:
+  --font <font>      The font to display information about, by name.
+  --source <source>  The source the font is available from.
+  --url <url>        A font page URL or direct font file URL.
+
+Description:
+  Display available information about a font, including its description,
+  category, designer, license, styles, statistics, catalog page, download
+  URL, and installation status. Available fields depend on the source.
+
+Sources:
+  fontshare   A font from Fontshare, by slug or family name.
+  google      A font family from Google Fonts, by family name.
+  homebrew    A font cask from Homebrew, by cask name. macOS only.
+  url         A direct link to a font archive or file.
+
+Examples:
+  ${_ME} show fontshare satoshi
+  ${_ME} show fontshare "General Sans"
+  ${_ME} show google "Open Sans"
+  ${_ME} show homebrew font-fira-code
+  ${_ME} show https://www.fontshare.com/fonts/paquito
+  ${_ME} show https://fonts.google.com/specimen/Montserrat
+  ${_ME} show https://example.com/fonts/Example.zip
+HEREDOC
+show() {
+  local _font=
+  local _source=
+  local _url=
+  local _resolved=
+
+  while ((${#}))
+  do
+    case "${1:-}" in
+      --font|--source|--url)
+        if [[ -z "${2:-}" ]]
+        then
+          _exit_1 printf "%s requires a value.\n" "${1}"
+        fi
+
+        case "${1}" in
+          --font)   _font="${2}"    ;;
+          --source) _source="${2}"  ;;
+          --url)    _url="${2}"     ;;
+        esac
+        shift
+        ;;
+      *)
+        if [[ -z "${_source}" ]]
+        then
+          _source="${1}"
+        elif [[ -z "${_font}" ]]
+        then
+          _font="${1}"
+        else
+          _exit_1 printf "Unexpected argument: %s\n" "${1}"
+        fi
+        ;;
+    esac
+    shift
+  done
+
+  if [[ -n "${_url}" ]]
+  then
+    if ! _is_url "${_url}"
+    then
+      _exit_1 printf "Invalid URL: %s\n" "${_url}"
+    fi
+    if [[ -n "${_source}" ]] || [[ -n "${_font}" ]]
+    then
+      _exit_1 printf "A URL can't be combined with a source or font.\n"
+    fi
+    _source="${_url}"
+  fi
+
+  if [[ -z "${_font}" ]] && _is_url "${_source}"
+  then
+    _url="${_source}"
+    _resolved="$(_resolve_font_url "${_url}")"
+    _source="${_resolved%% *}"
+    _font="${_resolved#* }"
+  fi
+
+  if [[ "${_source}" == "url" ]] && _is_url "${_font}"
+  then
+    _url="${_font}"
+    _resolved="$(_resolve_font_url "${_url}")"
+    _source="${_resolved%% *}"
+    _font="${_resolved#* }"
+  fi
+
+  if [[ -z "${_source}" ]] || [[ -z "${_font}" ]]
+  then
+    _exit_1 printf "Usage: %s show ( <source> <font> | <url> | --source <source> --font <font> | --url <url> )\n" "${_ME}"
+  fi
+
+  local _page_url=
+  local _download_url=
+  local _description=
+  local _category=
+  local _designer=
+  local _publisher=
+  local _license=
+  local _version=
+  local _date_added=
+  local _updated=
+  local _views=
+  local _recent_views=
+  local _styles=
+  local _variable=
+  local _axes=
+  local _homepage=
+  local _name="${_font}"
+  local _metadata_line=
+  local _manifest_file=
+  local _installed_path=
+  local _total=0
+  local _present=0
+  local _missing=0
+
+  case "${_source}" in
+    fontshare|google|homebrew)
+      _command_exists curl ||
+        _exit_1 printf "Required command not found: curl\n"
+      ;;
+    url)
+      _url="${_url:-${_font}}"
+      _page_url="${_url}"
+      _download_url="${_url}"
+      ;;
+    *)
+      _exit_1 printf "Unsupported font source: %s\n" "${_source}"
+      ;;
+  esac
+
+  case "${_source}" in
+    fontshare)
+      local _fontshare_file="$(_temp file .json)"
+      curl -fsSL --compressed --connect-timeout 3 --max-time 12 \
+        "https://api.fontshare.com/v2/fonts?limit=1000&offset=0" \
+        -o "${_fontshare_file}" ||
+        _exit_1 printf "Unable to retrieve Fontshare catalog.\n"
+
+      # Select one family object from the fonts array. The scanner tracks JSON
+      # strings and object depth, so nested publisher, designer, and style
+      # objects remain part of their parent family record.
+      _metadata_line="$(awk -v wanted="${_font}" '
+        function json_value(s, key,    needle,p,i,c,e,out) {
+          needle = "\"" key "\""
+          p = index(s, needle)
+          if (!p) return ""
+          p += length(needle)
+          while (substr(s,p,1) ~ /[[:space:]]/) p++
+          if (substr(s,p,1) != ":") return ""
+          p++
+          while (substr(s,p,1) ~ /[[:space:]]/) p++
+          if (substr(s,p,1) != "\"") {
+            if (substr(s,p,4) == "null") return ""
+            out = ""
+            while (p <= length(s)) { c = substr(s,p,1); if (c == "," || c == "}" || c == "]" || c ~ /[[:space:]]/) break; out = out c; p++ }
+            return out
+          }
+          p++
+          out = ""
+          for (i=p; i<=length(s); i++) {
+            c = substr(s,i,1)
+            if (c == "\\") {
+              e = substr(s,++i,1)
+              if      (e == "n" || e == "r" || e == "t") out = out " "
+              else if (e == "\"") out = out "\""
+              else if (e == "\\") out = out "\\"
+              else out = out e
+            } else if (c == "\"") return out
+            else out = out c
+          }
+          return out
+        }
+        {
+          json = json $0
+        }
+        END {
+          start = index(json, "\"fonts\"")
+          if (!start) exit 1
+          start = index(substr(json,start), "[") + start - 1
+          if (start <= 0) exit 1
+          depth = 0; quoted = 0; escaped = 0; object_start = 0
+          for (i=start+1; i<=length(json); i++) {
+            c = substr(json,i,1)
+            if (quoted) {
+              if (escaped) escaped = 0
+              else if (c == "\\") escaped = 1
+              else if (c == "\"") quoted = 0
+              continue
+            }
+            if (c == "\"") { quoted = 1; continue }
+            if (c == "{") {
+              if (depth == 0) object_start = i
+              depth++
+            } else if (c == "}") {
+              depth--
+              if (depth == 0 && object_start) {
+                obj = substr(json,object_start,i-object_start+1)
+                slug = json_value(obj,"slug")
+                name = json_value(obj,"name")
+                if (tolower(slug) == tolower(wanted) || tolower(name) == tolower(wanted)) {
+                  story = json_value(obj,"story")
+                  category = json_value(obj,"category")
+                  license = json_value(obj,"license_type")
+                  views = json_value(obj,"views")
+                  recent = json_value(obj,"views_recent")
+                  version = json_value(obj,"version")
+                  added = json_value(obj,"inserted_at")
+                  pubpart = substr(obj,index(obj,"\"publisher\"") )
+                  publisher = json_value(pubpart,"name")
+                  despart = substr(obj,index(obj,"\"designers\"") )
+                  designer = json_value(despart,"name")
+                  stylepart = substr(obj,index(obj,"\"styles\"") )
+                  styles = gsub(/\"id\"[[:space:]]*:/,"",stylepart)
+                  variable = (obj ~ /\"is_variable\"[[:space:]]*:[[:space:]]*true/ ? "yes" : "no")
+                  gsub(/[\t\r\n]+/," ",story)
+                  printf "%s\034%s\034%s\034%s\034%s\034%s\034%s\034%s\034%s\034%s\034%s\034%s\n", name,story,category,license,views,recent,publisher,designer,styles,variable,added,slug
+                  found = 1
+                  exit
+                }
+                object_start = 0
+              }
+            } else if (c == "]" && depth == 0) exit
+          }
+          if (!found) exit 1
+        }
+      ' "${_fontshare_file}")" ||
+        _exit_1 printf "Fontshare font not found: %s\n" "${_font}"
+
+      IFS=$'\034' read -r _name _description _category _license _views _recent_views _publisher _designer _styles _variable _date_added _slug <<< "${_metadata_line}"
+      _font="${_slug}"
+      case "${_license}" in
+        itf_ffl)  _license="ITF Free Font License" ;;
+        sil_ofl)  _license="SIL Open Font License" ;;
+      esac
+      _page_url="https://www.fontshare.com/fonts/${_slug}"
+      _download_url="https://api.fontshare.com/v2/fonts/download/${_slug}"
+      ;;
+    google)
+      local _google_file="$(_temp file .json)"
+      curl -fsSL --compressed --connect-timeout 3 --max-time 12 \
+        "https://fonts.google.com/metadata/fonts" -o "${_google_file}" ||
+        _exit_1 printf "Unable to retrieve Google Fonts catalog.\n"
+
+      _metadata_line="$(sed '1s/^[^{]*//' "${_google_file}" | awk -v wanted="${_font}" '
+        function json_value(s,key,    needle,p,i,c,e,out) {
+          needle = "\"" key "\""; p=index(s,needle); if (!p) return ""
+          p += length(needle); while (substr(s,p,1) ~ /[[:space:]]/) p++
+          if (substr(s,p,1) != ":") return ""; p++
+          while (substr(s,p,1) ~ /[[:space:]]/) p++
+          if (substr(s,p,1) != "\"") { if(substr(s,p,4)=="null") return ""; out=""; while(p<=length(s)&&substr(s,p,1)!~ /[,}]]/&&substr(s,p,1)!~ /[[:space:]]/) out=out substr(s,p++,1); return out }; p++; out=""
+          for (i=p;i<=length(s);i++) { c=substr(s,i,1); if (c=="\\") { e=substr(s,++i,1); if(e=="n"||e=="r"||e=="t") out=out " "; else if(e=="\"") out=out "\""; else if(e=="\\") out=out "\\"; else out=out e } else if(c=="\"") return out; else out=out c }
+          return out
+        }
+        { json=json $0 }
+        END {
+          start=index(json,"\"familyMetadataList\""); if(!start) exit 1
+          start=index(substr(json,start),"[")+start-1; if(start<=0) exit 1
+          depth=0; quoted=0; escaped=0; object_start=0
+          for(i=start+1;i<=length(json);i++) {
+            c=substr(json,i,1)
+            if(quoted) { if(escaped) escaped=0; else if(c=="\\") escaped=1; else if(c=="\"") quoted=0; continue }
+            if(c=="\"") { quoted=1; continue }
+            if(c=="{") { if(depth==0) object_start=i; depth++ }
+            else if(c=="}") { depth--; if(depth==0&&object_start) {
+              obj=substr(json,object_start,i-object_start+1); name=json_value(obj,"family")
+              if(tolower(name)==tolower(wanted)) {
+                category=json_value(obj,"category"); designer=json_value(obj,"designer")
+                description=json_value(obj,"description")
+                added=json_value(obj,"dateAdded"); updated=json_value(obj,"lastModified")
+                fontpart=substr(obj,index(obj,"\"fonts\"")); styles=gsub(/\"filename\"[[:space:]]*:/,"",fontpart)
+                if(styles==0) styles=gsub(/\"thickness\"[[:space:]]*:/,"",fontpart)
+                axes=0
+                axes_position=index(obj,"\"axes\"")
+                if(axes_position) { axespart=substr(obj,axes_position); axes=gsub(/\"tag\"[[:space:]]*:/,"",axespart) }
+                printf "%s\034%s\034%s\034%s\034%s\034%s\034%s\034%s\n",name,category,designer,added,updated,styles,axes,description
+                found=1; exit
+              }
+              object_start=0
+            }} else if(c=="]"&&depth==0) exit
+          }
+          if(!found) exit 1
+        }
+      ')" ||
+        _exit_1 printf "Google Fonts family not found: %s\n" "${_font}"
+
+      IFS=$'\034' read -r _name _category _designer _date_added _updated _styles _axes _description <<< "${_metadata_line}"
+      if [[ "${_axes:-0}" -gt 0 ]]; then _variable="${_axes} axis/axes"; fi
+      _page_url="https://fonts.google.com/specimen/${_name// /%20}"
+      _download_url="https://fonts.google.com/download?family=${_name// /%20}"
+      ;;
+    homebrew)
+      local _brew_file="$(_temp file .json)"
+      curl -fsSL --compressed --connect-timeout 3 --max-time 12 \
+        "https://formulae.brew.sh/api/cask/${_font}.json" -o "${_brew_file}" ||
+        _exit_1 printf "Homebrew cask not found: %s\n" "${_font}"
+
+      _metadata_line="$(awk -v token="${_font}" '
+        function value(s,key,    n,p,i,c,e,out) {
+          n="\"" key "\""; p=index(s,n); if(!p)return ""; p+=length(n)
+          while(substr(s,p,1)~/[[:space:]]/)p++; if(substr(s,p,1)!=":")return ""; p++
+          while(substr(s,p,1)~/[[:space:]]/)p++
+          if(substr(s,p,1)=="[") { p++; while(substr(s,p,1)~/[[:space:]]/)p++ }
+          if(substr(s,p,1)!="\"")return ""; p++; out=""
+          for(i=p;i<=length(s);i++){c=substr(s,i,1);if(c=="\\"){e=substr(s,++i,1);if(e=="n"||e=="r"||e=="t")out=out " ";else if(e=="\"")out=out "\"";else if(e=="\\")out=out "\\";else out=out e}else if(c=="\"")return out;else out=out c} return out
+        }
+        { json=json $0 }
+        END {
+          name=value(json,"name"); desc=value(json,"desc"); homepage=value(json,"homepage")
+          download=value(json,"url"); version=value(json,"version")
+          analytics=index(json,"\"analytics\""); stats=""
+          if(analytics) {
+            a=substr(json,analytics)
+            periods[1]="30d"; periods[2]="90d"; periods[3]="365d"
+            for(i=1;i<=3;i++) {
+              period=periods[i]
+              pattern="\"" period "\"[[:space:]]*:[[:space:]]*[{][^}]*[}]"
+              if(match(a,pattern)) {
+                v=substr(a,RSTART,RLENGTH)
+                if(match(v,/:[[:space:]]*[0-9]+/)) {
+                  count=substr(v,RSTART,RLENGTH); gsub(/[^0-9]/,"",count)
+                  stats=stats period " " count " installs; "
+                }
+              }
+            }
+            sub(/; $/,"",stats)
+          }
+          gsub(/[\t\r\n]+/," ",desc)
+          printf "%s\034%s\034%s\034%s\034%s\034%s\n",name,desc,homepage,download,version,stats
+        }
+      ' "${_brew_file}")"
+      IFS=$'\034' read -r _name _description _homepage _download_url _version _views <<< "${_metadata_line}"
+      _page_url="https://formulae.brew.sh/cask/${_font}"
+      ;;
+  esac
+
+  printf "Name: %s\n" "${_name:-${_font}}"
+  printf "Source: %s\n" "${_source}"
+  [[ -n "${_description}" ]] && printf "Description: %s\n" "${_description}"
+  [[ -n "${_category}" ]] && printf "Category: %s\n" "${_category}"
+  [[ -n "${_designer}" ]] && printf "Designer: %s\n" "${_designer}"
+  [[ -n "${_publisher}" ]] && printf "Publisher: %s\n" "${_publisher}"
+  [[ -n "${_license}" ]] && printf "License: %s\n" "${_license}"
+  [[ -n "${_version}" ]] && printf "Version: %s\n" "${_version}"
+  [[ -n "${_date_added}" ]] && printf "Added: %s\n" "${_date_added}"
+  [[ -n "${_updated}" ]] && printf "Last updated: %s\n" "${_updated}"
+  [[ -n "${_styles}" ]] && printf "Styles: %s\n" "${_styles}"
+  [[ -n "${_variable}" ]] && printf "Variable font: %s\n" "${_variable}"
+  [[ -n "${_views}" ]] && printf "Views: %s\n" "${_views}"
+  [[ -n "${_recent_views}" ]] && printf "Recent views: %s\n" "${_recent_views}"
+  [[ -n "${_homepage}" ]] && printf "Homepage: %s\n" "${_homepage}"
+  printf "Font page: %s\n" "${_page_url}"
+  printf "Download: %s\n" "${_download_url}"
+
+  _manifest_file="$(_font_manifest_path "${_source}" "${_font}")"
+  if [[ "${_source}" == "homebrew" ]]
+  then
+    if _command_exists brew && brew list --cask "${_font}" >/dev/null 2>&1
+    then
+      printf "Installed: yes (Homebrew)\n"
+    else
+      printf "Installed: no\n"
+    fi
+  elif [[ -f "${_manifest_file}" ]]
+  then
+    while IFS= read -r _installed_path
+    do
+      [[ -n "${_installed_path}" ]] || continue
+      _total=$((_total + 1))
+      if [[ -e "${_installed_path}" ]]
+      then _present=$((_present + 1))
+      else _missing=$((_missing + 1))
+      fi
+    done < "${_manifest_file}"
+    if ((_total > 0 && _missing == 0))
+    then printf "Installed: yes (%d/%d files present)\n" "${_present}" "${_total}"
+    elif ((_present > 0))
+    then printf "Installed: incomplete (%d/%d files present)\n" "${_present}" "${_total}"
+    else printf "Installed: no\n"
+    fi
+  else
+    printf "Installed: no\n"
+  fi
 }
 
 # ------------------------------------------------------------------------ list

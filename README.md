@@ -68,7 +68,7 @@ curl -L https://raw.github.com/xwmx/font/master/font -o ~/bin/font && chmod +x ~
 - `unzip`
 - `find`
 
-The `search` subcommand also uses `grep`, `awk`, and `sed` to search the online font catalogs. These utilities are included with macOS and are available in standard Linux installations. On Linux, `bash` and `find` are almost always present, but `curl` and `unzip` are missing from some minimal installations.
+The `search` subcommand also uses `grep`, `awk`, and `sed` to search the online font catalogs. The `show` subcommand uses `awk`, `sed`, and `od` to read source metadata and encode URLs. These utilities are included with macOS and are available in standard Linux installations. On Linux, `bash` and `find` are almost always present, but `curl` and `unzip` are missing from some minimal installations.
 
 On Linux, [fontconfig](https://www.freedesktop.org/wiki/Software/fontconfig/) is also recommended. When `fc-cache` is available, `font` uses it to refresh the font cache after installing or uninstalling fonts, so changes show up in applications right away. Without it, fonts still install, but applications may not see them until the cache is rebuilt or you log out and back in.
 
@@ -209,7 +209,7 @@ Instead of downloading and copying files itself, `font` runs `brew install --cas
 
 ### Installing from URLs
 
-Instead of a source and font name, `font install` accepts a URL. `font status` and `font uninstall` do too, so the same URL identifies a font in all three commands. These URLs are recognized:
+Instead of a source and font name, `font install` accepts a URL. `font status`, `font uninstall`, and `font show` accept the same URL forms, so a URL identifies the same font across these commands. These URLs are recognized:
 
 | URL                    | Example                                         | Source      | Font             |
 |:-----------------------|:------------------------------------------------|:------------|:-----------------|
@@ -255,7 +255,7 @@ Some things to keep in mind:
 
 - A URL that isn't recognized, or a direct link to any other type of file, is rejected with an error.
 - Two links with the same file name, including `file://` URLs, share one record, so the second install replaces the first.
-- `font install url Example` does not work, since the link itself is needed to download or copy the file. Use the URL. `font status` and `font uninstall` can use either form.
+- `font install url Example` does not work, since the link itself is needed to download or copy the file. Use the URL. `font status`, `font uninstall`, and `font show` can use either form.
 
 #### Local Files
 
@@ -280,7 +280,7 @@ The file is copied instead of downloaded, so `curl` isn't needed. Local files ar
 
 ### Using Options
 
-`font install`, `font status`, and `font uninstall` identify a font with a source and font name, or with a URL. Each of these can also be given as an option with a value:
+`font install`, `font status`, `font uninstall`, and `font show` identify a font with a source and font name, or with a URL. Each of these can also be given as an option with a value:
 
 | Option              | Same as                                    |
 |:--------------------|:-------------------------------------------|
@@ -497,6 +497,7 @@ font help <subcommand name>
   <a href="#font-install">install</a> •
   <a href="#font-list">list</a> •
   <a href="#font-search">search</a> •
+  <a href="#font-show">show</a> •
   <a href="#font-status">status</a> •
   <a href="#font-subcommands">subcommands</a> •
   <a href="#font-uninstall">uninstall</a> •
@@ -631,6 +632,42 @@ Examples:
 Exit status:
   0   Search completed, including when no fonts match.
   1   Missing required command, invalid search pattern, or invalid parameters.
+```
+
+### `font show`
+
+```
+Usage:
+  font show <source> <font>
+  font show <url>
+  font show [--source <source>] [--font <font>] [--url <url>]
+
+Options:
+  --font <font>      The font to display information about, by name.
+  --source <source>  The source the font is available from.
+  --url <url>        A font page URL or direct font file URL.
+
+Description:
+  Display available information about a font, including its description,
+  category, designer, license, styles, statistics, catalog page, download
+  URL, and installation status. Available fields depend on the source.
+
+Sources:
+  fontshare, google, homebrew, url
+
+Examples:
+  font show fontshare satoshi
+  font show fontshare "General Sans"
+  font show google "Open Sans"
+  font show homebrew font-fira-code
+  font show https://www.fontshare.com/fonts/paquito
+  font show https://fonts.google.com/specimen/Montserrat
+  font show https://example.com/fonts/Example.zip
+
+Exit status:
+  0   Font information was retrieved successfully.
+  1   Invalid parameters, unsupported source or URL, missing dependency,
+      or the font could not be found in its source catalog.
 ```
 
 ### `font status`
