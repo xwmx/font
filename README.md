@@ -68,7 +68,7 @@ curl -L https://raw.github.com/xwmx/font/master/font -o ~/bin/font && chmod +x ~
 - `unzip`
 - `find`
 
-These are included with macOS. On Linux, `bash` and `find` are almost always present, but `curl` and `unzip` are missing from some minimal installations.
+The `search` subcommand also uses `grep`, `awk`, and `sed` to search the online font catalogs. These utilities are included with macOS and are available in standard Linux installations. On Linux, `bash` and `find` are almost always present, but `curl` and `unzip` are missing from some minimal installations.
 
 On Linux, [fontconfig](https://www.freedesktop.org/wiki/Software/fontconfig/) is also recommended. When `fc-cache` is available, `font` uses it to refresh the font cache after installing or uninstalling fonts, so changes show up in applications right away. Without it, fonts still install, but applications may not see them until the cache is rebuilt or you log out and back in.
 
@@ -145,7 +145,51 @@ Downloading 'Open Sans' from google...
 Installed 20 font file(s) for 'Open Sans' into /Users/example/Library/Fonts
 ```
 
-#### Homebrew Casks (macOS)
+#### Searching Fonts
+
+`font search` searches the online font catalogs from [Homebrew](https://formulae.brew.sh/cask-font/), [Fontshare](https://www.fontshare.com/), and [Google Fonts](https://fonts.google.com/). It matches font names and displays the source-specific install command and catalog page URL for each result:
+
+```bash
+font search mont
+```
+
+The search is case-insensitive and accepts extended regular expressions, just like `font list`:
+
+```bash
+# Search for names containing "space" or "clash"
+font search 'space|clash'
+
+# Search for names beginning with "mono"
+font search '^mono'
+
+# Search for names ending in "sans"
+font search 'sans$'
+```
+
+Quote expressions that contain shell characters such as `|`, `(`, `)`, or `$` so the shell passes the expression to `font` unchanged.
+
+Results are grouped by source. Each match includes a ready-to-use install command and a link to the font's catalog page. For example:
+
+```text
+Homebrew:
+  Font Fira Code
+    font install homebrew font-fira-code
+    https://formulae.brew.sh/cask/font-fira-code
+
+Fontshare:
+  General Sans
+    font install fontshare general-sans
+    https://www.fontshare.com/fonts/general-sans
+
+Google:
+  Montserrat
+    font install google Montserrat
+    https://fonts.google.com/specimen/Montserrat
+```
+
+The search requires an internet connection and `curl`, `grep`, `awk`, and `sed`. It searches the online catalogs; it does not install fonts. Use the install command shown with a result to install a font.
+
+### Homebrew Casks (macOS)
 
 The `homebrew` source installs fonts from [Homebrew's font casks](https://formulae.brew.sh/cask-font/). Use the full cask name, which always starts with `font-`:
 
@@ -452,6 +496,7 @@ font help <subcommand name>
   <a href="#font-help">(default) / help</a> •
   <a href="#font-install">install</a> •
   <a href="#font-list">list</a> •
+  <a href="#font-search">search</a> •
   <a href="#font-status">status</a> •
   <a href="#font-subcommands">subcommands</a> •
   <a href="#font-uninstall">uninstall</a> •
@@ -560,6 +605,32 @@ Exit status:
   0   Success, including when no entries match.
   1   Invalid search pattern, unsupported source, or --source combined
       with --no-source.
+```
+
+### `font search`
+
+```
+Usage:
+  font search <string-or-regex>
+
+Description:
+  Search the Homebrew font casks, Fontshare, and Google Fonts catalogs for
+  font names matching a string or extended regular expression. Matching is
+  case-insensitive. Results include the source, install command, and catalog
+  URL.
+
+Requirements:
+  curl, grep, awk, sed
+
+Examples:
+  font search mont
+  font search "space grotesk"
+  font search '^(space|clash)'
+  font search 'mono$'
+
+Exit status:
+  0   Search completed, including when no fonts match.
+  1   Missing required command, invalid search pattern, or invalid parameters.
 ```
 
 ### `font status`
