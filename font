@@ -1524,7 +1524,7 @@ Description:
   URL.
 
 Requirements:
-  curl, grep, awk, sed
+  curl, grep, awk, sed, wc, tr
 
 Examples:
   ${_ME} search "space grotesk"
@@ -1721,44 +1721,84 @@ search() {
     done < "${_matches_file}"
   }
 
-  # Homebrew publishes a dedicated font-cask catalog. Fall back to the full
-  # cask catalog for older Homebrew API versions.
-  if ! curl -fsSL "https://formulae.brew.sh/api/cask-font.json" -o "${_catalog_file}"
+  # Homebrew's font listing is a dedicated HTML page. The JSON API only
+  # exposes the entire cask catalog, so use the smaller font-only listing.
+  if curl -fsSL --connect-timeout 10 --max-time 30 \
+    "https://formulae.brew.sh/cask-font/" -o "${_catalog_file}"
   then
-    if ! curl -fsSL "https://formulae.brew.sh/api/cask.json" -o "${_catalog_file}"
-    then
-      _warn printf "homebrew: unable to fetch catalog\n"
-      : > "${_records_file}"
-    else
-      _json_records homebrew "${_catalog_file}" > "${_records_file}"
-    fi
+    awk '
+      function cell_text(value) {
+        gsub(/<[^>]*>/, "", value)
+        gsub(/&amp;/, "\&", value)
+        gsub(/&quot;/, "\"", value)
+        gsub(/&#39;/, sprintf("%c", 39), value)
+        gsub(/&nbsp;/, " ", value)
+        return value
+      }
+      function field(row, tag,    start, rest, stop) {
+        start = index(row, "<" tag)
+        if (!start) return ""
+        rest = substr(row, start)
+        start = index(rest, ">")
+        if (!start) return ""
+        rest = substr(rest, start + 1)
+        stop = index(rest, "</" tag ">")
+        if (!stop) return ""
+        return cell_text(substr(rest, 1, stop - 1))
+      }
+      {
+        row = row $0
+        if (index(row, "</tr>") == 0) next
+        token = row
+        sub(/^.*href="\/cask\//, "", token)
+        sub(/".*$/, "", token)
+        if (token ~ /^font-/) {
+          name = row
+          # The final table cell contains the human-readable font name.
+          while (match(name, /<td[^>]*>/)) {
+            name = substr(name, RSTART + RLENGTH)
+            stop = index(name, "</td>")
+            if (!stop) break
+            last = cell_text(substr(name, 1, stop - 1))
+            name = substr(name, stop + 5)
+          }
+          if (last == "") last = token
+          print last "\t" token "\thttps://formulae.brew.sh/cask/" token
+        }
+        row = ""
+        last = ""
+      }
+    ' "${_catalog_file}" > "${_records_file}"
   else
-    _json_records homebrew "${_catalog_file}" > "${_records_file}"
+    _warn printf "homebrew: unable to fetch font listing\n"
+    : > "${_records_file}"
   fi
   _show_matches "Homebrew"
 
-  # Fontshare's catalog is paginated.
+  # Fontshare's catalog is paginated. Limit each request and cap the number
+  # of pages so a changed API cannot leave the command running indefinitely.
   : > "${_records_file}"
   _offset=0
-  while :
+  _page=0
+  while ((_page < 20))
   do
     _url="https://api.fontshare.com/v2/fonts?limit=100&offset=${_offset}"
-    if ! curl -fsSL "${_url}" -o "${_catalog_file}"
+    if ! curl -fsSL --connect-timeout 10 --max-time 30 "${_url}" -o "${_catalog_file}"
     then
       if ((_offset == 0)); then _warn printf "fontshare: unable to fetch catalog\n"; fi
       break
     fi
-    _json_records fontshare "${_catalog_file}" >> "${_records_file}"
-    # The API uses pages of 100. Stop after a short page; the record count
-    # from the current response is obtained separately to preserve pagination.
-    _page_count="$(_json_records fontshare "${_catalog_file}" | wc -l | tr -d ' ')"
-    [[ "${_page_count}" -lt 100 ]] && break
+    _json_records fontshare "${_catalog_file}" > "${_matches_file}"
+    _page_count="$(wc -l < "${_matches_file}" | tr -d ' ')"
+    cat "${_matches_file}" >> "${_records_file}"
+    ((_page_count < 100)) && break
     _offset=$((_offset + 100))
+    _page=$((_page + 1))
   done
   _show_matches "Fontshare"
 
   # Google Fonts prefixes its JSON response with an anti-hijacking marker.
-  if ! curl -fsSL "https://fonts.google.com/metadata/fonts" -o "${_catalog_file}"
+  if ! curl -fsSL --connect-timeout 10 --max-time 30 "https://fonts.google.com/metadata/fonts" -o "${_catalog_file}"
   then
     _warn printf "google: unable to fetch catalog\n"
     : > "${_records_file}"
