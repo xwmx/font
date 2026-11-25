@@ -18,6 +18,8 @@
 
 ## Installation
 
+<p><sup><a href="#top">↑</a></sup></p>
+
 ### Homebrew
 
 <p><sup><a href="#installation">↑</a></sup></p>
@@ -113,6 +115,8 @@ sudo FONT_DIR=/usr/local/share/fonts font install fontshare satoshi
 `FONT_DIR` does not apply to the `homebrew` source, since Homebrew decides where cask fonts are linked.
 
 ## Usage
+
+<p><sup><a href="#top">↑</a></sup></p>
 
 ### Installing Fonts
 
