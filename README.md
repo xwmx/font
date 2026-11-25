@@ -20,6 +20,8 @@
 
 ### Homebrew
 
+<p><sup><a href="#installation">↑</a></sup></p>
+
 To install with [Homebrew](http://brew.sh/) on macOS or Linux:
 
 ```bash
@@ -35,6 +37,8 @@ brew install xwmx/taps/font
 
 ### Manual
 
+<p><sup><a href="#installation">↑</a></sup></p>
+
 To install as an administrator, copy and paste one of the following multi-line commands:
 
 ```bash
@@ -49,6 +53,8 @@ sudo curl -L https://raw.github.com/xwmx/font/master/font -o /usr/local/bin/font
 
 ###### User-only Installation
 
+<p><sup><a href="#manual">↑</a></sup></p>
+
 To install with just user permissions, simply add the `font` script to your `$PATH`. If you already have a `~/bin` directory, for example, you can use one of the following commands:
 
 ```bash
@@ -60,6 +66,8 @@ curl -L https://raw.github.com/xwmx/font/master/font -o ~/bin/font && chmod +x ~
 ```
 
 ### Requirements
+
+<p><sup><a href="#installation">↑</a></sup></p>
 
 `font` is a Bash script that works on macOS and Linux, including Ubuntu, Debian, Fedora, and Arch. It depends on the following tools:
 
@@ -87,6 +95,8 @@ The `homebrew` source works differently. It requires [Homebrew](http://brew.sh/)
 
 ### Font Directory
 
+<p><sup><a href="#installation">↑</a></sup></p>
+
 Fonts are installed into the following directory by default:
 
 | Platform | Default font directory                          |
@@ -105,6 +115,8 @@ sudo FONT_DIR=/usr/local/share/fonts font install fontshare satoshi
 ## Usage
 
 ### Installing Fonts
+
+<p><sup><a href="#usage">↑</a></sup></p>
 
 To install a font, use `font install` with a source and a font name:
 
@@ -128,6 +140,8 @@ A URL can be used in place of a source and font name. See [Installing from URLs]
 
 ### Sources
 
+<p><sup><a href="#usage">↑</a></sup></p>
+
 `font` currently supports the following sources:
 
 | Source      | Font name                                                   | Example                              |
@@ -146,6 +160,8 @@ Installed 20 font file(s) for 'Open Sans' into /Users/example/Library/Fonts
 ```
 
 #### Searching Fonts
+
+<p><sup><a href="#usage">↑</a></sup></p>
 
 `font search` searches the online font catalogs from [Homebrew](https://formulae.brew.sh/cask-font/), [Fontshare](https://www.fontshare.com/), and [Google Fonts](https://fonts.google.com/). It matches font names and displays the source-specific install command and catalog page URL for each result:
 
@@ -191,6 +207,8 @@ The search requires an internet connection and `curl`, `grep`, `awk`, and `sed`.
 
 ### Homebrew Casks (macOS)
 
+<p><sup><a href="#usage">↑</a></sup></p>
+
 The `homebrew` source installs fonts from [Homebrew's font casks](https://formulae.brew.sh/cask-font/). Use the full cask name, which always starts with `font-`:
 
 ```
@@ -208,6 +226,8 @@ Instead of downloading and copying files itself, `font` runs `brew install --cas
 - `font list`, `font status`, and `font uninstall` ask Homebrew directly, so they work with every installed font cask, including ones you installed with `brew` before using `font`.
 
 ### Installing from URLs
+
+<p><sup><a href="#usage">↑</a></sup></p>
 
 Instead of a source and font name, `font install` accepts a URL. `font status`, `font uninstall`, and `font show` accept the same URL forms, so a URL identifies the same font across these commands. These URLs are recognized:
 
@@ -234,6 +254,8 @@ Quote URLs that contain `&` or `?` so your shell doesn't interpret them.
 
 #### Direct Links
 
+<p><sup><a href="#installing-from-urls">↑</a></sup></p>
+
 A link to any other host is treated as a direct link to a font file. A `.zip` link installs every `.otf` and `.ttf` file in the archive, and a `.ttf` or `.otf` link installs that file. Query strings and fragments are ignored when working out the file type.
 
 Direct links are recorded under the `url` source, using the file name without its extension as the font name:
@@ -259,6 +281,8 @@ Some things to keep in mind:
 
 #### Local Files
 
+<p><sup><a href="#installing-from-urls">↑</a></sup></p>
+
 A `file://` URL installs a font file or archive that is already on your computer, such as one you downloaded earlier. The path must be absolute, so the URL starts with `file:///`. Special characters are percent-encoded, so a space is `%20`, and `file://localhost/path` is accepted too:
 
 ```
@@ -279,6 +303,8 @@ The file is copied instead of downloaded, so `curl` isn't needed. Local files ar
 ```
 
 ### Using Options
+
+<p><sup><a href="#usage">↑</a></sup></p>
 
 `font install`, `font status`, `font uninstall`, and `font show` identify a font with a source and font name, or with a URL. Each of these can also be given as an option with a value:
 
@@ -317,6 +343,8 @@ An option without a value, a `--url` value that isn't a URL, or a `--url` combin
 `font list` has its own [`--source` and `--no-source`](#listing-fonts) options, which filter the list.
 
 ### Listing Fonts
+
+<p><sup><a href="#usage">↑</a></sup></p>
 
 `font list` shows the fonts installed with `font`, followed by all font files found in the system's font directories:
 
@@ -416,6 +444,8 @@ On Linux:
 
 ### Checking Status
 
+<p><sup><a href="#usage">↑</a></sup></p>
+
 `font status` reports whether a font is installed. It exits with status `0` when every recorded file is present and `1` otherwise, so it can be used in scripts:
 
 ```
@@ -444,6 +474,8 @@ Installed: 'font-fira-code' (homebrew)
 
 ### Uninstalling Fonts
 
+<p><sup><a href="#usage">↑</a></sup></p>
+
 `font uninstall` removes only the files that `font` installed for that font:
 
 ```
@@ -463,6 +495,8 @@ Removed 'font-fira-code' (homebrew)
 ```
 
 ## Help
+
+<p><sup><a href="#usage">↑</a></sup></p>
 
 ```
 Usage:
@@ -492,6 +526,8 @@ font help <subcommand name>
 
 ## Subcommands
 
+<p><sup><a href="#usage">↑</a></sup></p>
+
 <p align="center">
   <a href="#font-help">(default) / help</a> •
   <a href="#font-install">install</a> •
@@ -506,6 +542,8 @@ font help <subcommand name>
 
 ### `font help`
 
+<p><sup><a href="#subcommands">↑</a></sup></p>
+
 ```
 Usage:
   font help [<subcommand>]
@@ -515,6 +553,8 @@ Description:
 ```
 
 ### `font install`
+
+<p><sup><a href="#subcommands">↑</a></sup></p>
 
 ```
 Usage:
@@ -566,6 +606,8 @@ Exit status:
 
 ### `font list`
 
+<p><sup><a href="#subcommands">↑</a></sup></p>
+
 ```
 Usage:
   font list [--source [<source>] | --no-source] [<search string>]
@@ -610,6 +652,8 @@ Exit status:
 
 ### `font search`
 
+<p><sup><a href="#subcommands">↑</a></sup></p>
+
 ```
 Usage:
   font search <string-or-regex>
@@ -635,6 +679,8 @@ Exit status:
 ```
 
 ### `font show`
+
+<p><sup><a href="#subcommands">↑</a></sup></p>
 
 ```
 Usage:
@@ -672,6 +718,8 @@ Exit status:
 
 ### `font status`
 
+<p><sup><a href="#subcommands">↑</a></sup></p>
+
 ```
 Usage:
   font status <source> <font>
@@ -703,6 +751,8 @@ Examples:
 
 ### `font subcommands`
 
+<p><sup><a href="#subcommands">↑</a></sup></p>
+
 ```
 Usage:
   font subcommands [--raw]
@@ -715,6 +765,8 @@ Description:
 ```
 
 ### `font uninstall`
+
+<p><sup><a href="#subcommands">↑</a></sup></p>
 
 ```
 Usage:
@@ -747,6 +799,8 @@ Examples:
 ```
 
 ### `font version`
+
+<p><sup><a href="#subcommands">↑</a></sup></p>
 
 ```
 Usage:
