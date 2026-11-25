@@ -16,9 +16,32 @@
 
 `font` is designed to be lightweight, easy to use, and contained in a single, portable script that can be `curl`ed into any environment.
 
+<p align="center">&nbsp;</p><!-- spacer -->
+
+<div align="center">
+  <h1 align="center" id="font"><code>font</code></h1>
+</div>
+
+<div align="center">
+  <a href="#installation">Installation</a>&nbsp;·
+  <a href="#usage">Usage</a>&nbsp;&nbsp;
+</div>
+
+<p align="center"></p><!-- spacer -->
+
+<div align="center">
+  <a href="#help">Help</a>
+</div>
+
+<p align="center"></p><!-- spacer -->
+
+<div align="center">
+  <a href="#top">&nbsp;↑&nbsp;</a>
+</div>
+
 ## Installation
 
-<p><sup><a href="#top">↑</a></sup></p>
+<p><sup><a href="#font">↑</a></sup></p>
 
 ### Homebrew
 
@@ -116,7 +139,7 @@ sudo FONT_DIR=/usr/local/share/fonts font install fontshare satoshi
 
 ## Usage
 
-<p><sup><a href="#top">↑</a></sup></p>
+<p><sup><a href="#font">↑</a></sup></p>
 
 ### Installing Fonts
 
@@ -500,7 +523,7 @@ Removed 'font-fira-code' (homebrew)
 
 ## Help
 
-<p><sup><a href="#usage">↑</a></sup></p>
+<p><sup><a href="#font">↑</a></sup></p>
 
 ```
 Usage:
