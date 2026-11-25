@@ -8,8 +8,6 @@
         \/__/               "888"
 ```
 
-# `𝓯𝕠𝖓ⓣ`
-
 `font` is a command line program for managing fonts on macOS and Linux.
 
 `font` downloads fonts from online sources, installs them into your user font directory, and keeps track of exactly which files were installed, so fonts can be listed, checked, or cleanly removed later using simple, memorable commands.
@@ -19,7 +17,7 @@
 <p align="center">&nbsp;</p><!-- spacer -->
 
 <div align="center">
-  <h1 align="center" id="font"><code>font</code></h1>
+  <h1 align="center" id="font"><code>𝓯𝕠𝖓ⓣ</code></h1>
 </div>
 
 <div align="center">
