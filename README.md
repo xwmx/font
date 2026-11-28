@@ -1,12 +1,26 @@
-```
+<div align="center">
+<pre class="notranslate"><code>
   __     ___      ___         .
  / _|   /\  \   /' _ `\     .o8
-| |_   /::\  \  /\ \/\ \  .o888oo
+  | |_   /::\  \  /\ \/\ \  .o888oo
 |  _| /:/\:\__\ \ \_\ \_\   888
 |_|   \:\/:/  /  \/_/\/_/   888
-       \::/  /              888 .
-        \/__/               "888"
-```
+         \::/  /              888 .
+          \/__/               "888"
+</code></pre>
+</div>
+
+<p align="center"></p><!-- spacer -->
+
+<div align="center">
+  <a href="https://github.com/xwmx/font/actions" rel="nofollow">
+    <img  src="https://img.shields.io/github/actions/workflow/status/xwmx/font/tests.yml?branch=main"
+          alt="Build Status"
+          style="max-width:100%;">
+  </a>
+</div>
+
+<br/>
 
 `font` is a command line program for managing fonts on macOS and Linux.
 
