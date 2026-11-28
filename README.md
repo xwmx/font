@@ -1,13 +1,20 @@
+
 <div align="center">
-<pre class="notranslate"><code>
-  __     ___      ___         .
+<table>
+<tr>
+<td>
+
+<pre><code>  __     ___      ___         .
  / _|   /\  \   /' _ `\     .o8
-  | |_   /::\  \  /\ \/\ \  .o888oo
+| |_   /::\  \  /\ \/\ \  .o888oo
 |  _| /:/\:\__\ \ \_\ \_\   888
 |_|   \:\/:/  /  \/_/\/_/   888
-         \::/  /              888 .
-          \/__/               "888"
-</code></pre>
+       \::/  /              888 .
+        \/__/               "888"</code></pre>
+
+</td>
+</tr>
+</table>
 </div>
 
 <p align="center"></p><!-- spacer -->
