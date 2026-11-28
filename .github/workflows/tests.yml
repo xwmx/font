@@ -1,0 +1,96 @@
+###############################################################################
+# .github/workflows/tests.yml
+#
+# NOTE: GitHub Actions does not allocate a TTY, preventing the tested
+# program from detecting piped input using `[[ -t 0 ]]` in the
+# `_interactive_input()` function.
+#
+# More information:
+#
+# https://github.com/actions/runner/issues/241
+#
+# faketty is a GitHub action that uses work-arounds to provide a tty:
+#
+# https://github.com/marketplace/actions/faketty
+#
+# Scripts used by faketty for each platform:
+#
+# linux: `faketty`
+#
+# ```bash
+# #!/bin/bash
+#
+# script -q -e -c "$*"
+# ```
+#
+# win32: `faketty.ps1`
+#
+# ```posh
+# Invoke-Expression "$args"
+# ```
+#
+# darwin: `faketty`
+#
+# requires: `brew install expect`
+#
+# ```bash
+# #!/bin/bash
+#
+# unbuffer $*
+# ```
+###############################################################################
+
+name: "font · Test Suite"
+
+on:
+  pull_request:
+    branches: [ main ]
+  # push:
+  #   branches: [ main ]
+  workflow_dispatch:
+
+jobs:
+  test-macos-latest:
+    name: "Test: macOS Latest"
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: "Setup"
+        run: |
+          brew update
+          brew install bat
+          brew install bats-core
+          brew install expect
+      - name: "Set $TERM=xterm"
+        run:  printf "TERM=xterm\\n" >> $GITHUB_ENV
+      - name: "Print Environment"
+        run: |
+          sw_vers
+          /usr/libexec/ApplicationFirewall/socketfilterfw --getglobalstate
+      - name: "Run bats tests"
+        # use `script` for a PTY
+        run:  script -q /dev/null bats test
+        # unbuffer implementation:
+        # run:  unbuffer bats --trace test
+  test-ubuntu-2404:
+    name: "Test: Ubuntu 24.04"
+    runs-on: ubuntu-24.04
+    env:
+      LANG: C.UTF-8
+      LC_ALL: C.UTF-8
+      LC_TYPE: C.UTF-8
+    steps:
+      - uses: actions/checkout@v1
+      - name: "Setup"
+        run: |
+          sudo apt-get update
+          sudo apt-get install bats -y
+      - name: "Set $TERM=xterm"
+        run:  printf "TERM=xterm\\n" >> $GITHUB_ENV
+      - name: "Print encoding variables"
+        run: |
+          echo "'$LANG'"
+          echo "'$LC_ALL'"
+          echo "'$LC_TYPE'"
+      - name: "Run bats tests"
+        run:  script -q -e -c "bats test"
