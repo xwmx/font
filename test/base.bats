@@ -36,6 +36,8 @@ Available subcommands:
   help
   install
   list
+  search
+  show
   status
   subcommands
   uninstall
@@ -58,6 +60,8 @@ HEREDOC
 help
 install
 list
+search
+show
 status
 subcommands
 uninstall
