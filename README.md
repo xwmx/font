@@ -4,20 +4,19 @@
 <tr>
 <td>
 
-<pre><code>  __     ___      ___         .
- / _|   /\  \   /' _ `\     .o8
-| |_   /::\  \  /\ \/\ \  .o888oo
-|  _| /:/\:\__\ \ \_\ \_\   888
-|_|   \:\/:/  /  \/_/\/_/   888
-       \::/  /              888 .
-        \/__/               "888"</code></pre>
+<pre><code>   __          ___      ___
+  / _|  ____ /' _ `\   /\  \
+ | |_  / __ \/\ \/\ \  \ \  \ 
+ |  _|/ /_/ /\ \_\ \_\ /  \__\
+ |_|  \____/  \/_/\/_// /\/__/
+                      \/__/</code></pre>
 
 </td>
 </tr>
 </table>
 </div>
 
-<p align="center"></p><!-- spacer -->
+<br/>
 
 <div align="center">
   <a href="https://github.com/xwmx/font/actions" rel="nofollow">
