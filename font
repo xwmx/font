@@ -1469,7 +1469,8 @@ install() {
       _exit_1 printf "Invalid URL: %s\\n" "${_url}"
     fi
 
-    if [[ -n "${_source}" ]] || [[ -n "${_font}" ]]
+    if [[ -n "${_source}" ]] ||
+       [[ -n "${_font}"   ]]
     then
       _exit_1 printf "A URL can't be combined with a source or font.\\n"
     fi
@@ -1489,7 +1490,9 @@ install() {
   if [[ -z "${_source:-}" ]] ||
      [[ -z "${_font:-}"   ]]
   then
-    _exit_1 printf "Usage: %s install ( <source> <font> | <url> | --source <source> --font <font> | --url <url> )\\n" "${_ME}"
+    help "install"
+
+    return 1
   fi
 
   local _required_commands=(curl unzip)
@@ -1540,7 +1543,10 @@ install() {
 # Fontshare/Google search and show use fast streaming field extraction;
 # Homebrew's small single-cask response uses the general JSON reader below.
 _json_catalog() {
-  local _source="${1}" _wanted="${2}" _mode="${3}" _file="${4}"
+  local _file="${4}"
+  local _mode="${3}"
+  local _source="${1}"
+  local _wanted="${2}"
 
   # Search needs only the top-level family name/slug. Splitting the minified
   # catalog at object starts lets awk extract those fields directly, avoiding
@@ -1658,12 +1664,15 @@ _json_catalog() {
     return $?
   fi
 
-  local _parser="$(_temp file .awk)" _input_file="${4}"
+  local _input_file="${4}"
+  local _parser="$(_temp file .awk)"
+
   if [[ "${_source}" == "google" ]]
   then
     _input_file="$(_temp file .json)"
     sed '1s/^[^{]*//' "${_file}" > "${_input_file}"
   fi
+
   cat > "${_parser}" <<'JSON_AWK'
 # Small JSON reader retained for Homebrew's individual cask response.
 function skip_space(s, p) { while (substr(s,p,1) ~ /[ \t\r\n]/) p++; return p }
@@ -1809,7 +1818,10 @@ END {
   if(mode=="show" && !found) exit 1
 }
 JSON_AWK
-  awk -v source="${_source}" -v wanted="${_wanted}" -v mode="${_mode}" \
+  awk                       \
+    -v mode="${_mode}"      \
+    -v source="${_source}"  \
+    -v wanted="${_wanted}"  \
     -f "${_parser}" "${_input_file}"
 }
 
@@ -1834,7 +1846,9 @@ HEREDOC
 search() {
   if (($# == 0))
   then
-    _exit_1 printf "Usage: %s search <string-or-regex>\n" "${_ME}"
+    help "search"
+
+    return 1
   fi
 
   local _query="$*"
